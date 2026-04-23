@@ -1,0 +1,295 @@
+
+open "dane.gdt"
+
+# Statystyki opisowe
+summary Y X1 X2 X3 X4 
+
+#Wykresy zależności widok>wykresy zmiennych>wykres rozrzutu X-Y
+
+ols Y const X1 X2 X3 X4
+corr
+vif
+
+# Metoda Hellwiga
+
+# Zdefiniowanie listy zmiennych objaśniających 
+list xlist = X1 X2 X3 X4
+
+# Zdefiniowanie zmiennej objaśnianej
+series Y = Y
+
+# Obliczenie liczby zmiennych objaśniających (k) oraz liczby obserwacji (n)
+scalar k = nelem(xlist) 
+scalar n = nobs(Y) 
+
+# Definicja funkcji dodawania binarnego
+function matrix binary_addition(scalar n, matrix position) 
+    index=1
+    loop j=1..n --quiet
+        if index==1
+            if position[j,1]==0
+                position[j,1]=1
+                index=0
+            else
+                position[j,1]=0
+            endif
+        endif
+    endloop
+    return position
+end function
+
+# Definicja funkcji metody Hellwiga
+function scalar Hellwig_Method (series y, list list_x) 
+    H=0
+    loop foreach j list_x --quiet
+        h=(corr(y,list_x.$j))^2
+        s=0
+        loop foreach k list_x --quiet
+            c=abs(corr(list_x.$j,list_x.$k))
+            s=s+c
+        endloop
+        h=h/s
+        H=H+h
+    endloop
+    return H
+end function
+
+# Inicjalizacja macierzy pozycji zerami
+position=zeros(n,1)
+
+# Obliczenie całkowitej liczby kombinacji zmiennych objaśniających
+combinations=2^nelem(xlist)-1
+
+# Obliczenie wartości metody Hellwiga dla pełnego zestawu zmiennych
+H_max=Hellwig_Method(Y,xlist)
+
+# Inicjalizacja zmiennej do przechowywania maksymalnej wartości metody Hellwiga
+H_=-1
+
+# Pętla przez wszystkie możliwe kombinacje zmiennych objaśniających
+loop j=0..combinations-1 --quiet
+    if j == 0
+        list_x = xlist
+    else
+        # Generowanie kolejnej pozycji binarnej
+        position=binary_addition(n,position)
+        list_x=xlist
+        # Wykluczenie zmiennych na podstawie pozycji binarnej
+        loop foreach k xlist --quiet
+            if position[k,1]==1
+                list_x=list_x-xlist.$k
+            endif
+        endloop
+    endif
+    # Obliczenie wartości metody Hellwiga dla bieżącej kombinacji
+    H_=Hellwig_Method(Y,list_x)
+    # Wyświetlenie wartości metody Hellwiga i listy zmiennych
+    list_x
+    H_
+    # Aktualizacja maksymalnej pojemności integralnej i odpowiadającej listy zmiennych, jeśli konieczne
+    if H_>H_max
+        H_max=H_
+        max_memory_list=list_x
+    endif
+endloop
+
+# Wyjście maksymalnej pojemności integralnej i odpowiadającej listy zmiennych
+H_max
+max_memory_list
+
+
+ols Y const X1 X3
+modtest --normality
+ols Y  const X1 X2 X3
+modtest --normality
+
+l_Y = log(Y)
+l_X1 = log(X1)
+l_X2 = log(X2)
+l_X3 = log(X3)
+l_X4 = log(X4)
+
+ols l_Y const l_X1 l_X2 l_X3
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+
+
+# Efekt katalizy
+
+# Przypisanie zmiennych do listy
+list xlist = l_X1 l_X2 l_X3 l_X4 
+
+# Definicja funkcji metody Hellwiga
+function scalar Hellwig_Method (series y, list list_x) 
+    H = 0
+    loop foreach i list_x --quiet
+        h = (corr(y, list_x.$i))^2
+        s = 0
+        loop foreach j list_x --quiet
+            c = abs(corr(list_x.$i, list_x.$j))
+            s = s + c
+        endloop
+        h = h / s
+        H = H + h
+    endloop
+    return H
+end function
+
+# Przechowywanie informacji o katalizatorach
+list catalyst_pairs = null
+list catalyst_variables = null
+
+scalar found_catalysts = 0 
+loop foreach i xlist --quiet
+    loop foreach j xlist --quiet
+        if i < j 
+            scalar correlation_i = corr(xlist.$i, l_Y)
+            scalar correlation_j = corr(xlist.$j, l_Y)
+            scalar correlation_i_j = corr(xlist.$i, xlist.$j)
+            scalar correlation_i_sign = correlation_i > 0 ? 1 : -1 
+            scalar correlation_j_sign = correlation_j > 0 ? 1 : -1 
+            
+            # Sprawdzenie warunków katalizy
+            if abs(correlation_i) < abs(correlation_j) 
+                if correlation_i_sign * correlation_j_sign * correlation_i_j < 0 
+                    # Pierwszy warunek na katalizator:
+                    # Warunek: Produkt korelacji między zmiennymi i Y oraz j Y jest ujemny,
+                    # a korelacja między i a j jest większa od korelacji między i a Y podzielonej przez korelację między j a Y
+                    if correlation_i_sign * correlation_j_sign * correlation_i_j > (correlation_i_sign * correlation_j_sign * correlation_i / correlation_j) 
+                        list pair = xlist.$i xlist.$j
+                        list catalyst = xlist.$i 
+                        catalyst_pairs += pair
+                        catalyst_variables += catalyst
+                        scalar found_catalysts = 1
+                    endif
+                endif
+            else
+                if correlation_i_sign * correlation_j_sign * correlation_i_j < 0 
+                    # Drugi warunek na katalizator:
+                    # Warunek: Produkt korelacji między zmiennymi i Y oraz j Y jest ujemny,
+                    # a korelacja między j a i jest większa od korelacji między j a Y podzielonej przez korelację między i a Y
+                    if correlation_i_sign * correlation_j_sign * correlation_i_j > (correlation_i_sign * correlation_j_sign * correlation_j / correlation_i) 
+                        list pair = xlist.$i xlist.$j
+                        list catalyst = xlist.$j  
+                        catalyst_pairs += pair
+                        catalyst_variables += catalyst
+                        scalar found_catalysts = 1
+                    endif
+                endif
+            endif
+        endif
+    endloop
+endloop
+
+# Wyświetlanie katalizatorów
+if found_catalysts
+    loop foreach i catalyst_pairs
+        printf "Para z katalizatorem: %s\n", i
+    endloop
+    loop foreach i catalyst_variables
+        printf "Katalizator: %s\n", i
+    endloop
+else
+    print "Brak katalizatorów"
+endif
+
+
+# Przeprowadzenie regresji dla modelu
+ols Y const xlist --quiet
+
+# Obliczenie wartości Hellwiga
+hellwig_value = Hellwig_Method(l_Y, xlist)
+
+# Obliczenie natężenia efektu katalizy
+scalar catalyst_effect = $rsq - hellwig_value
+
+scalar rel_catalyst_effect = (catalyst_effect/$rsq) * 100
+
+printf "Natężenie efektu katalizy: %.7f\n", catalyst_effect
+printf "Względne natężenie efektu katalizy: %.7f\n", rel_catalyst_effect
+
+# Test normalności rozkładu reszt
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+modtest --normality
+
+# Test White'a
+ols l_Y const l_X1 l_X2 l_X3 l_X4 
+modtest --white
+
+# Wartości odstające model>analiza>ocena wpływowych obserwacji
+
+# Prametryczne testy istotności, Test F
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+
+# Testy pominiętych zmiennych
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+omit l_X1 --test-only
+omit l_X2 --test-only
+omit l_X3 --test-only
+omit l_X4 --test-only
+
+# Test serii
+
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+series e = $uhat
+matrix X = {l_Y, e}
+matrix Xsorted = msortby(X, 1)
+esorted = Xsorted[,2]
+series esorteds = esorted[,1]
+runs esorteds --equal
+
+# Test RESET
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+reset
+
+# Test chowa
+open "dane_test_chowa.gdt"
+
+l_Y = log(Y)
+l_X1 = log(X1)
+l_X2 = log(X2)
+l_X3 = log(X3)
+l_X4 = log(X4)
+
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+chow 65
+
+open "dane.gdt"
+# Współliniowość
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+vif
+
+# Koincydencja
+ols l_Y const l_X1 l_X2 l_X3 l_X4
+corr
+
+# PROGNOZA PUNKTOWA, prognoza dla wartości średnich
+ols l_Y const l_X1 l_X2 l_X3 l_X4 --vcv --quiet
+matrix x_tau = {1, mean(l_X1), mean(l_X2), mean(l_X3), mean(l_X4)}
+matrix a = $coeff
+scalar prognoza_punktowa_dla_l_Y = x_tau*a
+
+
+# wariancja prognozy
+scalar wariancja_prognozy_dla_l_Y= x_tau*$vcv*x_tau'+$ess/$df
+
+# blad prognozy
+scalar blad_prognozy_dla_l_Y=sqrt(wariancja_prognozy_dla_l_Y)
+
+#95% CI dla l_q
+scalar dolna = prognoza_punktowa_dla_l_Y-critical(t,$df,0.025)*blad_prognozy_dla_l_Y
+scalar gorna = prognoza_punktowa_dla_l_Y+critical(t,$df,0.025)*blad_prognozy_dla_l_Y
+
+scalar prognoza_punktowa_dla_Y = exp(prognoza_punktowa_dla_l_Y+0.5*wariancja_prognozy_dla_l_Y)
+#95% CI dla q
+scalar dolna_dla_Y = exp(dolna)
+scalar gorna_dla_Y = exp(gorna)
+
+
+
+
+
+
+
+
+
+
