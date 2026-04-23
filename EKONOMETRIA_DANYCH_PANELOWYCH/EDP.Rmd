@@ -1,0 +1,542 @@
+---
+title: "Projekt EDP"
+author: "Julia Matyja, Kinga Kołodziej"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true  
+    theme: flatly 
+---
+
+# Potrzebne biblioteki
+
+```{r message=FALSE, warning=FALSE}
+library(eurostat)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(corrplot)
+library(purrr)
+library(patchwork)
+library(scales)
+library(plm)
+library(moments)
+library(car)
+library(lmtest)
+library(tseries)
+library(sandwich)
+```
+
+# Przygotowanie danych 
+
+```{r message=FALSE, warning=FALSE}
+countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE",
+               "GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT",
+               "RO","SK","SI","ES","SE")
+
+unemployment <- get_eurostat("une_rt_a", time_format = "num") %>%
+  filter(sex=="T", age=="Y20-64", unit=="PC_ACT", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, stopa_bezrobocia = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+education <- get_eurostat("edat_lfse_04", time_format = "num") %>%
+  filter(sex == "T", age == "Y25-64", isced11 == "ED3-8", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, edukacja = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+inflation <- get_eurostat("prc_hicp_aind", time_format = "num") %>%
+  filter(coicop=="CP00", unit == "RCH_A_AVG", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, inflacja = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+population_density <- get_eurostat("demo_r_d3dens", time_format = "num") %>%
+  filter(geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, gestosc = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+fertility <- get_eurostat("demo_frate", time_format = "num") %>%
+  filter(geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, dzietnosc = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+gdp_pc <- get_eurostat("nama_10_pc", time_format = "num") %>%
+  filter(unit == "CP_EUR_HAB",na_item == "B1GQ", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, pkb_pc = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+employment <- get_eurostat("lfsa_ergaed", time_format = "num") %>%
+  filter(sex == "T", age == "Y20-64", isced11 == "ED3_4", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, zatrudnienie = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+gov_expend <- get_eurostat("tec00023", time_format = "num") %>%
+  filter(sector == "S13", unit == "PC_GDP", geo %in% countries) %>%
+  rename(rok = TIME_PERIOD) %>%
+  select(geo, rok, wydatki_rzadowe = values) %>%
+  distinct(geo, rok, .keep_all = TRUE)
+
+panel <- reduce(
+  list(
+    unemployment,
+    education,
+    inflation,
+    population_density,
+    fertility,
+    gdp_pc,
+    employment,
+    gov_expend
+  ),
+  full_join, by = c("geo", "rok")
+) %>%
+  filter(rok >= 2015 & rok <= 2023) %>%
+  arrange(geo, rok)
+
+country_names <- data.frame(
+  country_code = c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","EL",
+                   "HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"),
+  kraj = c("Austria","Belgia","Bułgaria","Chorwacja","Cypr","Czechy","Dania","Estonia",
+           "Finlandia","Francja","Niemcy","Grecja","Węgry","Irlandia","Włochy","Łotwa","Litwa",
+           "Luksemburg","Malta","Holandia","Polska","Portugalia","Rumunia","Słowacja",
+           "Słowenia","Hiszpania","Szwecja")
+)
+
+panel <- left_join(panel, country_names,
+                   by = c("geo" = "country_code")) %>%
+  select(
+    kraj, rok,
+    stopa_bezrobocia, edukacja, inflacja,
+    gestosc, dzietnosc, pkb_pc, zatrudnienie, wydatki_rzadowe
+  )
+
+write.csv(panel, "~/Desktop/EDP.csv", row.names = FALSE)
+```
+
+# Prezentacja i opis danych 
+
+```{r}
+panel
+```
+
+```{r}
+sum(is.na(panel))
+```
+
+```{r message=FALSE, warning=FALSE}
+vars <- c(
+  "stopa_bezrobocia",
+  "edukacja",
+  "inflacja",
+  "gestosc",
+  "dzietnosc",
+  "pkb_pc",
+  "zatrudnienie",
+  "wydatki_rzadowe"
+)
+
+labels <- c(
+  stopa_bezrobocia = "Stopa bezrobocia (% aktywnych zawodowo)",
+  edukacja = "Osoby z wykształceniem ≥ średnim (25–64, %)",
+  inflacja = "Inflacja (średnioroczna, %)",
+  gestosc = "Gęstość zaludnienia (os./km²)",
+  dzietnosc = "Współczynnik dzietności",
+  pkb_pc = "PKB per capita (EUR)",
+  zatrudnienie = "Wskaźnik zatrudnienia (20–64, %)",
+  wydatki_rzadowe = "Wydatki rządowe (% PKB)"
+)
+
+pretty3 <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  mid <- (rng[1] + rng[2]) / 2
+  c(rng[1], mid, rng[2])
+}
+
+plot_time_facet <- function(df, var, var_label) {
+  ggplot(df, aes(x = rok, y = .data[[var]])) +
+    geom_line(size = 0.6, color = "black") +
+    geom_point(size = 1, color = "darkred") +
+    facet_wrap(~ kraj, scales = "free_y", ncol = 4) +
+    scale_y_continuous(breaks = function(x) pretty3(x)) +   
+    labs(title = paste(var_label),
+         x = "Rok", y = var_label) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(face = "bold", size = 15),
+      strip.text = element_text(face = "bold", size = 8),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 5),
+      axis.text.y = element_text(size = 5)
+    )
+}
+for (v in vars) {
+  print(plot_time_facet(panel, v, labels[v]))
+  cat("\n\n")
+}
+```
+
+**Analiza podstawowych statystyk**
+
+```{r}
+statystyki_opisowe <- panel %>%
+  select(-kraj, -rok) %>%
+  summarize(across(everything(), list(
+    Min = ~min(. , na.rm=TRUE),
+    Q1 = ~quantile(., 0.25, na.rm=TRUE),
+    Mean = ~mean(. , na.rm=TRUE),
+    Median = ~median(. , na.rm=TRUE),
+    Q3 = ~quantile(., 0.75, na.rm=TRUE),
+    Max = ~max(. , na.rm=TRUE),
+    Odch_stand = ~sd(. , na.rm=TRUE),
+    Wsp_zmiennosci = ~(sd(., na.rm=TRUE) / mean(., na.rm=TRUE)),
+    Skośność = ~skewness(., na.rm=TRUE),
+    Kurtoza = ~kurtosis(., na.rm=TRUE)
+  ),
+  .names = "{.col}__{.fn}"
+  )) %>%
+  pivot_longer(cols = everything(),
+               names_to = c("Zmienna", "Statystyka"),
+               names_sep = "__") %>%
+  pivot_wider(names_from = Statystyka, values_from = value) %>%
+  arrange(Zmienna)
+
+kable(statystyki_opisowe, digits = 2, caption = "Statystyki opisowe") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+**Analiza zależności pomiędzy zmiennymi**
+
+```{r}
+kor_df <- panel %>%
+  select(-kraj, -rok) %>%
+  mutate(across(everything(), as.numeric)) %>%  
+  cor(use = "pairwise.complete.obs")
+
+kable(kor_df, digits = 2, caption = "Macierz korelacji") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r warning=FALSE}
+custom_red <- colorRampPalette(c("#fff5f5", "#e8b3b3", "#b34d4d", "#7a0b0b"))
+
+corrplot(kor_df,
+         method = "color",
+         type = "upper",
+         col = custom_red(300),
+         addCoef.col = "black",
+         number.cex = 0.7,
+         tl.cex = 0.9,
+         tl.col = "black")
+```
+
+```{r}
+model <- lm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe, data = panel)
+vif(model)
+```
+
+# Budowa modeli
+
+```{r}
+colnames(panel)
+```
+
+**model regresji łącznej**
+
+```{r}
+model_ols <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe, 
+                 data = panel, 
+                 model = "pooling")
+summary(model_ols)
+```
+
+
+**model z efektami ustalonymi jednokierunkowy (efekty indywidualne)**
+
+```{r}
+model_fe_oneway <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe,
+                       data = panel,
+                       index = c("kraj", "rok"),
+                       model = "within",
+                       effect = "individual")
+summary(model_fe_oneway)
+```
+
+
+**model z efektami ustalonymi dwukierunkowy**
+
+```{r}
+model_fe_twoways <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe,
+                       data = panel,
+                       index = c("kraj", "rok"),
+                       model = "within",
+                       effect = "twoways")
+summary(model_fe_twoways)
+```
+
+
+**model z efektami losowymi jednokierunkowy**
+
+```{r}
+model_re_oneway <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe,
+                       data = panel,
+                       index = c("kraj", "rok"),
+                       model = "random",
+                       effect = "individual")
+summary(model_re_oneway)
+```
+
+
+**model z efektami losowymi dwukierunkowy**
+
+```{r}
+model_re_twoways <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + pkb_pc + zatrudnienie + wydatki_rzadowe,
+                        data = panel,
+                        index = c("kraj", "rok"),
+                        model = "random",
+                        effect = "twoways")
+summary(model_re_twoways)
+```
+
+
+# Wybór najlepszego modelu poprzez zastosowanie testów
+
+**Porównanie regresji łącznej i modelu FE (jednokierunkowego)**
+
+
+```{r}
+pFtest(model_fe_oneway, model_ols)
+```
+
+**Porównanie regresji łącznej i modelu RE (jednokierunkowego)**
+
+
+```{r}
+plmtest(model_ols, effect = "individual", type = "bp")
+```
+
+
+**Porównanie modelu FE (jednokierunkowego) i modelu FE (dwukierunkowego)**
+
+
+```{r}
+pFtest(model_fe_twoways, model_fe_oneway)
+```
+
+
+**Porównanie modelu FE (jednokierunkowego) i modelu RE (jednokierunkowego)**
+
+
+```{r}
+phtest(model_fe_oneway, model_re_oneway)
+```
+
+**Porównanie modelu FE (dwukierunkowego) i modelu RE (dwukierunkowego)**
+
+
+```{r}
+phtest(model_fe_twoways, model_re_twoways)
+```
+
+# Ostateczny wybór modelu
+
+```{r}
+summary(model_fe_twoways)
+```
+
+# Ostateczny dobór zmiennych
+
+**usunięcie pkb per capita**
+
+```{r}
+model1 <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + dzietnosc + zatrudnienie + wydatki_rzadowe,
+                        data = panel,
+                        index = c("kraj", "rok"),
+                        model = "within",
+                        effect = "twoways")
+summary(model1)
+```
+
+**usunięcie dzietnosci**
+
+```{r}
+model2 <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + pkb_pc + zatrudnienie + wydatki_rzadowe,
+                        data = panel,
+                        index = c("kraj", "rok"),
+                        model = "within",
+                        effect = "twoways")
+summary(model2)
+```
+
+**usunięcie pkb per capita i dzietnosci**
+
+```{r}
+model3 <- plm(stopa_bezrobocia ~ edukacja + inflacja + gestosc + zatrudnienie + wydatki_rzadowe,
+                        data = panel,
+                        index = c("kraj", "rok"),
+                        model = "within",
+                        effect = "twoways")
+summary(model3)
+```
+
+# Weryfikacja modelu
+
+** Testowanie autokorelacji składnika losowego **
+
+```{r}
+pwartest(model3)
+```
+```{r}
+pbgtest(model3, order="1")
+pbgtest(model3, order="2")
+pbgtest(model3, order="3")
+pbgtest(model3, order="4")
+pbgtest(model3, order="5")
+pbgtest(model3, order="6")
+pbgtest(model3, order="7")
+pbgtest(model3, order="8")
+```
+
+**Test korelacji międzygrupowej**
+
+```{r}
+pcdtest(model3, test = "cd")
+pcdtest(model3, test = "lm")
+```
+
+**Badanie heteroskedastyczności składnika losowego**
+
+```{r}
+bptest(model3, studentize = FALSE)
+```
+
+```{r}
+bptest(model3, studentize = TRUE)
+```
+
+**Badanie normalności reszt**
+
+```{r}
+reszty <- residuals(model3)
+shapiro_test <- shapiro.test(reszty)
+shapiro_test
+```
+```{r}
+jarque.bera.test(reszty)
+```
+
+```{r}
+hist(reszty,
+     breaks = 30,
+     probability = TRUE,
+     col = "lightgrey",
+     main = "Histogram reszt",
+     xlab = "Reszty")
+```
+
+# Estymatory odporne
+
+```{r}
+coeftest(model3,
+         vcov = vcovHC(model3, type = "HC1", cluster = "group"))
+```
+
+# Model dynamiczny
+
+```{r}
+panel <- panel %>% arrange(kraj, rok)
+
+panel_dyn <- panel %>%
+  group_by(kraj) %>%
+  mutate(stopa_bezrobocia_lag1 = lag(stopa_bezrobocia, 1)) %>%
+  ungroup() %>%
+  filter(!is.na(stopa_bezrobocia_lag1))
+
+model_dyn <- plm(stopa_bezrobocia ~ stopa_bezrobocia_lag1 + edukacja + inflacja + gestosc + zatrudnienie + wydatki_rzadowe,
+                 data = panel_dyn,
+                 effect = "twoways",
+                 model = "within",
+                 index = c("kraj", "rok"))
+
+summary(model_dyn)
+```
+
+```{r}
+model_gmm <- pgmm(
+  stopa_bezrobocia ~ lag(stopa_bezrobocia, 1) +
+                     edukacja + inflacja + gestosc + zatrudnienie + wydatki_rzadowe |
+                     lag(stopa_bezrobocia, 2:3),
+  data           = panel,
+  index          = c("kraj", "rok"),
+  transformation = "d",
+  model          = "twosteps"
+)
+
+summary(model_gmm)
+```
+
+
+# INNE
+
+Próba rozwiązania problemu autokorelacji składnika losowego:
+Gdyby w modelu występowała wyłącznie autokorelacja pierwszego rzędu, możliwe byłoby podjęcie próby jej eliminacji poprzez zastosowanie transformacji uwzględniającej indywidualne oszacowania parametru RHO dla każdego kraju.
+
+```{r}
+model <- plm(
+  stopa_bezrobocia ~ edukacja + inflacja + gestosc + zatrudnienie + wydatki_rzadowe,
+  data = panel,
+  index = c("kraj","rok"),
+  model = "within",
+  effect = "twoways"
+)
+
+panel_pw <- panel %>%
+  arrange(kraj, rok) %>%
+  mutate(reszty_fe = residuals(model))
+
+panel_pw <- panel_pw %>%
+  group_by(kraj) %>%
+  mutate(reszty_lag = dplyr::lag(reszty_fe)) %>%
+  ungroup()
+
+rho_i <- panel_pw %>%
+  filter(!is.na(reszty_lag)) %>%
+  group_by(kraj) %>%
+  summarise(rho = cor(reszty_fe, reszty_lag, use = "complete.obs")) %>%
+  ungroup()
+
+rho_i
+
+panel_pw <- panel_pw %>%
+  left_join(rho_i, by = "kraj")
+
+panel_pw <- panel_pw %>%
+  group_by(kraj) %>%
+  mutate(
+    stopa_bezrobocia_pw = stopa_bezrobocia - rho * lag(stopa_bezrobocia),
+    edukacja_pw = edukacja - rho * lag(edukacja),
+    inflacja_pw = inflacja - rho * lag(inflacja),
+    gestosc_pw = gestosc - rho * lag(gestosc),
+    zatrudnienie_pw = zatrudnienie - rho * lag(zatrudnienie),
+    wydatki_pw = wydatki_rzadowe - rho * lag(wydatki_rzadowe)
+  ) %>%
+  filter(!is.na(stopa_bezrobocia_pw)) %>%
+  ungroup()
+
+model_pw <- plm(
+  stopa_bezrobocia_pw ~ edukacja_pw + inflacja_pw + gestosc_pw + zatrudnienie_pw + wydatki_pw,
+  data = panel_pw,
+  index = c("kraj","rok"),
+  model = "within",
+  effect = "twoways"
+)
+```
