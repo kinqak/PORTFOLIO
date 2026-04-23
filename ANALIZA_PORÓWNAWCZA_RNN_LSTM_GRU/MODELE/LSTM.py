@@ -34,9 +34,10 @@ train_data = index_data.iloc[:split_index]
 test_data = index_data.iloc[split_index:]
 
 scaler = MinMaxScaler(feature_range=(0, 1))
-scaler.fit(train_data[["Price"]])  
-scaled_train = scaler.transform(train_data[["Price"]])
-scaled_test = scaler.transform(test_data[["Price"]])
+scaler.fit(train_data[["Price"]])
+
+train_scaled = scaler.transform(train_data[["Price"]])
+test_scaled = scaler.transform(test_data[["Price"]])
 
 # Funkcja tworząca sekwencje
 def create_sequences(data, seq_len):
@@ -65,8 +66,8 @@ param_grid = list(product(sequence_lengths, neuron_options, num_layers_list, arc
 # Pętla po konfiguracjach
 for sequence_length, base_neurons, num_layers, arch, batch_size, epochs, dropout_rate in param_grid:
 
-    X_train, y_train = create_sequences(scaled_train, sequence_length)
-    X_test, y_test = create_sequences(scaled_test, sequence_length)
+    X_train, y_train = create_sequences(train_scaled, sequence_length)
+    X_test, y_test = create_sequences(test_scaled, sequence_length)
     X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
     X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
@@ -119,7 +120,7 @@ for sequence_length, base_neurons, num_layers, arch, batch_size, epochs, dropout
     all_actuals.append(actual_prices.tolist())
 
 # Zapis wyników
-pd.DataFrame(results).to_excel(f"Results_LSTM_{index_name}HAHAH.xlsx", index=False)
+pd.DataFrame(results).to_excel(f"Results_LSTM_{index_name}.xlsx", index=False)
 
 os.makedirs(f"Plots/{index_name}/loss", exist_ok=True)
 os.makedirs(f"Plots/{index_name}/forecast", exist_ok=True)
