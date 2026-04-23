@@ -32,5 +32,4 @@ The data is segmented into three economic periods:
 - `DATA/` – input time series (MSCI World, Emerging; Stable, Pandemic, War).  
 - `MODELS/` – training scripts for SimpleRNN, LSTM, GRU.  
 - `RESULTS/` – simulation outputs: model type, hyperparameters, evaluation metrics (MAE, RMSE, etc.).  
-- `PLOTS/` – forecast and loss visualizations (PNG).  
 
