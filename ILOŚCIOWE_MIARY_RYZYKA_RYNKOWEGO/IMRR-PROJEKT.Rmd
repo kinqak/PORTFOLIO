@@ -1,0 +1,955 @@
+---
+title: "IMRR-PROJEKT"
+author: "Kinga Kołodziej"
+date: "2025-01-14"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: "flatly"
+---
+
+# Wymagane biblioteki
+
+```{r message=FALSE, warning=FALSE}
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("rugarch")
+library(rugarch)
+#install.packages("knitr")
+library(knitr)
+#install.packages("DT")
+library(DT)
+#install.packages("tidyverse")
+library(tidyverse)
+#install.packages("PerformanceAnalytics")
+library(PerformanceAnalytics)
+#install.packages("distr")
+library(distr)
+#install.packages("kableExtra")
+library(kableExtra)
+#install.packages("grid")
+library(grid)
+#install.packages("gridExtra")
+library(gridExtra)
+#install.packages("moments")
+library(moments)
+```
+
+# Wstęp
+Celem projektu jest implementacja i analiza metod wyznaczania wartości zagrożonej (VaR) oraz oczekiwanej straty (ES), które pozwalają na ocenę ryzyka finansowego w oparciu o dane rzeczywiste. Do przeprowadzenia analizy wykorzystano dzienne ceny zamknięcia akcji (USD) spółki Apple Inc. w okresie od 3 stycznia 2007 roku do 22 listopada 2024 roku. Dane te zostały poddane analizie statystycznej, a ich charakterystyka została przedstawiona za pomocą podstawowych statystyk opisowych oraz wizualizacji, ilustrujących zmienność cen i stóp zwrotu w czasie. Projekt uwzględnia obliczenie VaR oraz ES czterema wybranymi metodami, ich wizualizację oraz ocenę skuteczności za pomocą testów wstecznych, które dostarczają informacji o zgodności prognoz z rzeczywistymi danymi.
+
+```{r echo=FALSE}
+data <- read.csv("~/Desktop/ROK 3/Semestr5/Ilościowe miary ryzyka rynkowego/Projekt zaliczeniowy/apple_daily.csv") 
+
+datatable(data, options = list(
+  scrollX = TRUE,  
+  scrollY = "300px" 
+))
+```
+
+```{r echo=FALSE, fig.height=8, fig.width=14}
+data$Data <- as.Date(data$Data, format="%Y-%m-%d")
+
+mean_close <- mean(data$Zamkniecie, na.rm = TRUE)
+
+ggplot(data, aes(x = Data, y = Zamkniecie)) +
+  geom_line(color = "darkred") +
+  geom_hline(yintercept = mean_close, color = "black") +
+  labs(title = "Ceny zamknięcia spółki APPLE Inc.",
+       x = "Data",
+       y = "Cena zamknięcia") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+```
+
+Wykres przedstawia ceny zamknięcia akcji spółki Apple Inc. na przestrzeni lat 2007–2025, ukazując wyraźny trend wzrostowy. Początkowo ceny oscylowały wokół niskich wartości (poniżej 50 USD), a w późniejszych latach osiągnęły poziomy przekraczające 200 USD. Wzrost ten, szczególnie widoczny od 2010 roku, przyspieszył znacząco po 2020 roku, co może być związane z sukcesami rynkowymi spółki, wprowadzeniem innowacyjnych produktów oraz sprzyjającymi warunkami makroekonomicznymi. Na wykresie można zaobserwować liczne krótkoterminowe wahania cen, odzwierciedlające zmienność charakterystyczną dla rynku akcji.Czarna linia pozioma(średnia cena zamknięcia akcji na przestrzeni analizowanych lat) stanowi poziom odniesienia, który może być interpretowany jako historyczny próg wsparcia lub oporu. Wykres ilustruje dynamiczny rozwój spółki Apple i jej rosnącą wartość rynkową, co czyni go istotnym punktem odniesienia w analizie długoterminowej.
+
+```{r echo=FALSE}
+descriptive_stats <- data %>%
+  summarise(
+    Count = sum(!is.na(Zamkniecie)),
+    Mean = mean(Zamkniecie, na.rm = TRUE),
+    Median = median(Zamkniecie, na.rm = TRUE),
+    StdDev = sd(Zamkniecie, na.rm = TRUE),
+    Min = min(Zamkniecie, na.rm = TRUE),
+    Max = max(Zamkniecie, na.rm = TRUE),
+    Q1 = quantile(Zamkniecie, 0.25, na.rm = TRUE),
+    Q3 = quantile(Zamkniecie, 0.75, na.rm = TRUE),
+    Skewness = skewness(Zamkniecie, na.rm = TRUE),
+    Kurtosis = kurtosis(Zamkniecie, na.rm = TRUE)
+  )
+
+descriptive_stats %>%
+  kable(
+    format = "html",
+    col.names = c(
+      "Liczba obserwacji", "Średnia", "Mediana", "Odchylenie standardowe",
+      "Wartość minimalna", "Wartość maksymalna", "Dolny kwartyl", "Górny kwartyl",
+      "Skośność", "Kurtoza"
+    ),
+    caption = "Statystyki opisowe dla dziennych cen zamknięcia akcji spółki APPLE Inc.",
+    align = "c"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = TRUE,
+    position = "center"
+  ) %>%
+  row_spec(0, bold = TRUE) %>%
+  column_spec(2:10, width = "15%")
+```
+
+Dzienna cena zamknięcia akcji spółki Apple Inc., na podstawie 4505 obserwacji, wykazuje średnią wartość wynoszącą 56,02 USD, podczas gdy mediana, czyli wartość środkowa, wynosi 25,56 USD. Taki rozkład sugeruje występowanie asymetrii w danych, co potwierdza wartość skośności wynosząca 1,22 – wskazując na prawostronną asymetrię. Rozstęp cen jest znaczący: od minimalnej wartości 2,36 USD do maksymalnej wynoszącej 236,48 USD, przy odchyleniu standardowym równym 63,11 USD, co wskazuje na dużą zmienność cen w analizowanym okresie. Kurtoza na poziomie 3,08 wskazuje na rozkład zbliżony do normalnego, z lekkim wydłużeniem ogonów, co oznacza, że skrajne wartości występują nieco częściej niż w rozkładzie normalnym.
+
+# Logarytmiczne stopy zwrotu
+
+Logarytmiczne stopy zwrotu są jednym z najczęściej stosowanych narzędzi w analizie finansowej i statystycznej, pozwalając na precyzyjne oszacowanie zmian wartości aktywów w czasie. Są obliczane jako logarytm naturalny stosunku ceny zamknięcia w danym dniu do ceny zamknięcia w dniu poprzednim, zgodnie ze wzorem:
+
+$$
+R_t = \ln\left(\frac{P_t}{P_{t-1}}\right)
+$$
+gdzie:  
+- \( r_t \) – logarytmiczna stopa zwrotu w dniu \( t \),  
+- \( P_t \) – cena zamknięcia w dniu \( t \),  
+- \( P_{t-1} \) – cena zamknięcia w dniu poprzednim.
+
+
+```{r}
+data <- subset(data, select = c("Data", "Zamkniecie"))
+
+daily_returns <- data %>%
+  mutate(
+    Stopa_zwrotu_logarytmiczna = round(log(Zamkniecie / lag(Zamkniecie)), 4)
+  ) %>%
+  na.omit()  
+
+datatable(daily_returns, options = list(
+  scrollX = TRUE,  
+  scrollY = "300px" 
+))
+
+returns <- daily_returns$Stopa_zwrotu_logarytmiczna
+```
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+p1 <- qplot(x = daily_returns$Data, y = daily_returns$Stopa_zwrotu_logarytmiczna, geom = 'line') +
+  geom_line(color = 'darkred') +
+  labs(
+    x = '',
+    y = 'Wartość'
+  )  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+p2 <- qplot(daily_returns$Stopa_zwrotu_logarytmiczna, geom = 'density') +
+  coord_flip() +
+  geom_density(fill = 'darkred', alpha = 0.4) +
+  labs(x = '')  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+title <- textGrob(
+  "Logarytmiczne stopy zwrotu", 
+  gp = gpar(fontsize = 20, fontface = "bold")
+)
+
+grid.arrange(
+  title,
+  arrangeGrob(p1, p2, ncol = 2),
+  nrow = 2,
+  heights = c(0.1, 0.9)
+)
+```
+
+Na przedstawionych wykresach zaprezentowano analizę logarytmicznych stóp zwrotu akcji spółki. Wykres po lewej stronie ukazuje szereg czasowy stóp zwrotu, które oscylują wokół zera na przestrzeni lat 2007–2025. Widoczne są okresy podwyższonej zmienności, co może być związane z kluczowymi wydarzeniami rynkowymi, takimi jak kryzysy finansowe czy okresy dynamicznych zmian w gospodarce. Wykres po prawej stronie przedstawia rozkład tych stóp zwrotu, zbliżony do symetrycznego, choć z delikatną asymetrią prawostronną i wydłużonymi ogonami, co wskazuje na sporadyczne, lecz znaczące zdarzenia ekstremalne – zarówno zyski, jak i straty. 
+
+```{r echo=FALSE}
+returns_df <- data.frame(returns = returns)
+
+descriptive_stats_returns <- returns_df %>%
+  summarise(
+    Count = nrow(returns_df), 
+    Mean = mean(returns, na.rm = TRUE),
+    Median = median(returns, na.rm = TRUE),
+    StdDev = sd(returns, na.rm = TRUE),
+    Min = min(returns, na.rm = TRUE),
+    Max = max(returns, na.rm = TRUE),
+    Q1 = quantile(returns, 0.25, na.rm = TRUE),
+    Q3 = quantile(returns, 0.75, na.rm = TRUE),
+    Skewness = skewness(returns, na.rm = TRUE),
+    Kurtosis = kurtosis(returns, na.rm = TRUE)
+  )
+
+descriptive_stats_returns %>%
+  kable(
+    format = "html",
+    col.names = c(
+      "Liczba obserwacji", "Średnia", "Mediana", "Odchylenie standardowe",
+      "Wartość minimalna", "Wartość maksymalna", "Dolny kwartyl", "Górny kwartyl",
+      "Skośność", "Kurtoza"
+    ),
+    caption = "Statystyki opisowe dla dziennych stóp zwrotu logarytmicznych",
+    align = "c"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = TRUE,
+    position = "center"
+  ) %>%
+  row_spec(0, bold = TRUE) %>%
+  column_spec(2:10, width = "15%")
+```
+
+Analiza statystyk opisowych dla dziennych stóp zwrotu logarytmicznych akcji spółki Apple Inc., oparta na 4504 obserwacjach, wskazuje na średnią stopę zwrotu wynoszącą 0,0010 (0,1%). Mediana równa 0,0011 (0,11%) świadczy o tym, że rozkład stóp zwrotu jest zbliżony do symetrycznego, choć skośność wynosząca -0,366 wskazuje na delikatną asymetrię lewostronną. Odchylenie standardowe na poziomie 0,0198 (1,98%) wskazuje na umiarkowaną zmienność, która jest typowa dla rynku akcji. Wartość minimalna (-0,1973, czyli -19,73%) oraz maksymalna (0,13, czyli 13%) odzwierciedlają obecność rzadkich, ale ekstremalnych zdarzeń, takich jak nagłe spadki lub wzrosty wartości akcji. Rozkład stóp zwrotu jest charakteryzowany przez wysoką kurtozę wynoszącą 9,65, co sugeruje, że ekstremalne wartości występują częściej niż w przypadku rozkładu normalnego. Pierwszy kwartyl wynoszący -0,0079 (-0,79%) oraz trzeci kwartyl równy 0,0113 (1,13%) wskazują, że połowa obserwacji mieści się w przedziale od -0,79% do 1,13%. Statystyki te sugerują, że chociaż logarytmiczne stopy zwrotu mają tendencję do niewielkich codziennych wahań, ryzyko wystąpienia skrajnych zdarzeń jest istotnym aspektem charakterystyki tego instrumentu finansowego.
+
+# Techniki wyznaczania VaR i ES
+
+Value at Risk (VaR) i Expected Shortfall (ES) są kluczowymi miarami ryzyka finansowego, które pozwalają na oszacowanie potencjalnych strat w portfelu inwestycyjnym w określonym horyzoncie czasowym przy danym poziomie ufności.VaR określa maksymalną stratę, jaką portfel może ponieść w danym okresie z określonym prawdopodobieństwem. ES mierzy średnią stratę przekraczającą VaR, czyli uwzględnia ekstremalne scenariusze strat, które są pomijane przez VaR.
+
+## Metody 
+
+Parametry analizy obejmują rozmiar okna estymacyjnego (window_size) wynoszący 500 dni, co umożliwia uwzględnienie najnowszych trendów rynkowych przy jednoczesnym wyeliminowaniu wpływu starszych danych, oraz poziom ufności (confidence_level) równy 99%, który oznacza, że w 99% przypadków strata nie przekroczy oszacowanej wartości ryzyka. 
+
+```{r}
+window_size <- 500  
+confidence_level <- 0.99  
+```
+
+### Metoda historyczna
+
+Metoda historyczna w kontekście wyznaczania VaR i ES polega na wykorzystaniu historycznych danych o stopach zwrotu do oszacowania ryzyka strat. W tej metodzie przyjmuje się, że przeszłe rozkłady zwrotów dobrze odwzorowują przyszłe ryzyko. Dla VaR określa się kwantyl \(1 - \alpha\) (np. 1% dla poziomu ufności 99%) z historycznych zwrotów, który wskazuje maksymalną stratę przy danym poziomie ufności. ES z kolei oblicza średnią wartość zwrotów poniżej progu VaR, co uwzględnia ekstremalne straty i zapewnia bardziej konserwatywną miarę ryzyka.
+
+```{r}
+historical_var_es <- function(returns, confidence_level, window_size) {
+  var_values <- numeric(length(returns) - window_size)
+  es_values <- numeric(length(returns) - window_size)
+
+  for (i in seq_len(length(var_values))) {
+    window <- returns[i:(i + window_size - 1)]
+    var_threshold <- quantile(window, 1 - confidence_level) 
+    var_values[i] <- var_threshold
+
+    below_var <- window[window <= var_threshold]
+    es_values[i] <- if (length(below_var) > 0) mean(below_var) else 0
+  }
+
+  list(var = abs(var_values), es = abs(es_values))
+}
+```
+
+### Metoda historyczna z wagami
+
+Metoda historyczna z wagami w kontekście VaR i ES polega na uwzględnieniu różnej istotności historycznych danych poprzez przypisanie im wag malejących w czasie, kontrolowanych parametrem  q . Nowsze obserwacje mają większe znaczenie, co pozwala lepiej odzwierciedlić aktualne warunki rynkowe. Wartość VaR jest określana na podstawie skumulowanych wag, które wskazują próg strat dla danego poziomu ufności, podczas gdy ES wyznacza średnią ważoną strat poniżej tego progu. Metoda ta jest bardziej adaptacyjna niż klasyczna metoda historyczna, dzięki czemu lepiej uwzględnia zmienność rynku.
+
+```{r}
+weighted_var_es <- function(returns, confidence_level, window_size, q = 0.995) {
+  var_values <- numeric(length(returns) - window_size)
+  es_values <- numeric(length(returns) - window_size)
+
+  for (i in seq_len(length(var_values))) {
+    window <- returns[i:(i + window_size - 1)]
+    n <- length(window)
+
+    weights_raw <- q^(n:1 - 1)
+
+    weights <- weights_raw / sum(weights_raw)
+
+    sorted_indices <- order(window)
+    sorted_returns <- window[sorted_indices]
+    sorted_weights <- weights[sorted_indices]
+
+    cumulative_weights <- cumsum(sorted_weights)
+
+    if (any(cumulative_weights >= 1 - confidence_level)) {
+      var_threshold <- sorted_returns[which(cumulative_weights >= 1 - confidence_level)[1]]
+    } else {
+      var_threshold <- NA
+    }
+    var_values[i] <- var_threshold
+
+    below_var_indices <- sorted_returns <= var_threshold
+    if (sum(below_var_indices) > 0) {
+      es_values[i] <- sum(sorted_returns[below_var_indices] * sorted_weights[below_var_indices]) / sum(sorted_weights[below_var_indices])
+    } else {
+      es_values[i] <- 0
+    }
+  }
+
+  list(var = abs(var_values), es = abs(es_values))
+}
+```
+
+### Metoda z heteroskedastycznością: EWMA
+
+Metoda EWMA (Exponentially Weighted Moving Average) uwzględnia zmienność heteroskedastyczną, modelując ją jako proces zmienny w czasie, w którym nowsze dane mają większą wagę, a starsze są eksponencjalnie wygaszane za pomocą współczynnika wygładzania  \(\lambda\) . W kontekście wyznaczania VaR i ES, zmienność jest dynamicznie szacowana na podstawie ważonej średniej kwadratów stóp zwrotu, co pozwala na skalowanie zwrotów w zależności od oszacowanej zmienności. VaR wyznacza się jako odpowiedni kwantyl tych skalowanych zwrotów, a ES jako średnią strat przekraczających próg VaR. 
+
+```{r}
+ewma_var_es <- function(returns, confidence_level, window_size, lambda = 0.94) {
+  ewma_sigma <- numeric(length(returns))
+  ewma_sigma[1] <- sd(returns[1:window_size]) 
+
+  for (i in 2:length(returns)) {
+    ewma_sigma[i] <- sqrt(lambda * ewma_sigma[i - 1]^2 + (1 - lambda) * returns[i - 1]^2)
+  }
+
+  var_values <- numeric(length(returns) - window_size)
+  es_values <- numeric(length(returns) - window_size)
+
+  for (i in seq_len(length(var_values))) {
+    scaled_returns <- returns[i:(i + window_size - 1)] * (ewma_sigma[i + window_size - 1] / ewma_sigma[i:(i + window_size - 1)])
+    
+    var_threshold <- quantile(scaled_returns, 1 - confidence_level)
+    var_values[i] <- var_threshold
+    below_var <- scaled_returns[scaled_returns <= var_threshold]
+    es_values[i] <- if (length(below_var) > 0) mean(below_var) else 0
+  }
+
+  list(var = abs(var_values), es = abs(es_values))
+}
+```
+
+### Metoda z heteroskedastycznością: GARCH(1,1)
+
+Model GARCH(1,1) (Generalized Autoregressive Conditional Heteroskedasticity) jest powszechnie stosowany do modelowania zmiennej w czasie zmienności finansowej. W kontekście wyznaczania VaR i ES uwzględnia on warunkową zmienność, która zmienia się dynamicznie w zależności od poprzednich zwrotów i ich wariancji. W tej metodzie oszacowanie zmienności odbywa się poprzez dopasowanie modelu GARCH(1,1) do szeregów czasowych zwrotów, co pozwala na obliczenie dynamicznych odchyleń standardowych. VaR jest następnie wyznaczany jako odpowiedni kwantyl zwrotów przeskalowanych przez oszacowaną zmienność, a ES jako średnia strat poniżej tego progu. 
+
+```{r}
+garch_var_es <- function(returns, confidence_level, window_size) {
+  spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                     mean.model = list(armaOrder = c(0, 0), include.mean = FALSE))
+
+  fit <- ugarchfit(spec, returns, solver = "solnp")
+  sigma <- sigma(fit)
+
+  var_values <- numeric(length(sigma) - window_size)
+  es_values <- numeric(length(sigma) - window_size)
+
+  for (i in seq_len(length(var_values))) {
+    scaled_returns <- returns[i:(i + window_size - 1)] / sigma[i:(i + window_size - 1)]
+    var_values[i] <- quantile(scaled_returns, 1 - confidence_level) * sigma[i + window_size - 1]
+    es_values[i] <- mean(scaled_returns[scaled_returns <= quantile(scaled_returns, 1 - confidence_level)]) * sigma[i + window_size - 1]
+  }
+
+  list(var = abs(var_values), es = abs(es_values))
+}
+```
+
+## Badanie empiryczne
+
+```{r}
+historical_results <- historical_var_es(returns, confidence_level, window_size)
+weighted_results <- weighted_var_es(returns, confidence_level, window_size)
+ewma_results <- ewma_var_es(returns, confidence_level, window_size)
+garch_results <- garch_var_es(returns, confidence_level, window_size)
+
+results <- tibble(
+  Date = daily_returns$Data[(window_size + 1):length(daily_returns$Data)], 
+  Historical_VaR = historical_results$var,
+  Weighted_VaR = weighted_results$var,
+  EWMA_VaR = ewma_results$var,
+  GARCH_VaR = garch_results$var,
+  Historical_ES = historical_results$es,
+  Weighted_ES = weighted_results$es,
+  EWMA_ES = ewma_results$es,
+  GARCH_ES = garch_results$es
+)
+```
+
+
+### Porównanie VaR i ES
+
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+  geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = Historical_VaR, color = "VaR"), size = 1.2) +  
+  geom_line(aes(y = Historical_ES, color = "ES"), size = 1.2) +   
+  labs(title = "Metoda historyczna", y = "Wartość", x = "Czas") +
+  scale_color_manual(
+    name = "Miary ryzyka",  
+    values = c("VaR" = "lightblue", "ES" = "darkred")
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Wykres przedstawia porównanie miar ryzyka Value at Risk (VaR) oraz Expected Shortfall (ES) wyznaczonych metodą historyczną. Miara ES, zgodnie ze swoją definicją, przyjmuje wyższe wartości niż VaR, ponieważ uwzględnia średnią stratę w scenariuszach przekraczających próg VaR, co czyni ją bardziej konserwatywną i lepiej odzwierciedlającą ekstremalne ryzyko. Charakter skokowy obu miar wynika z założeń metody historycznej, która bezpośrednio opiera się na przeszłych danych, co prowadzi do nagłych zmian w oszacowaniach wraz z aktualizacją okna czasowego. W okresach wysokiej zmienności, takich jak lata około 2020 roku, obie miary ryzyka znacząco wzrastają, odzwierciedlając rosnące ryzyko rynkowe. Natomiast w okresach stabilności, jak w okolicach 2015 roku, wartości VaR i ES pozostają relatywnie niskie i stabilne. Metoda historyczna zapewnia prostotę i intuicyjność w ocenie ryzyka, jednak jej ograniczenia wynikające z założenia stacjonarności danych mogą utrudniać precyzyjne modelowanie ryzyka w dynamicznie zmieniających się warunkach rynkowych.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+  geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = Weighted_VaR, color = "VaR"), size = 1.2) +
+  geom_line(aes(y = Weighted_ES, color = "ES"), size = 1.2) +
+  labs(title = "Metoda historyczna z wagami", y = "Wartość", x = "Czas") +
+  theme_minimal() +
+  scale_color_manual(
+    name = "Miary ryzyka",  
+    values = c("VaR" = "skyblue", "ES" = "darkred")
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Wykres przedstawia miary ryzyka Value at Risk (VaR) oraz Expected Shortfall (ES) wyznaczone metodą historyczną z wagami, gdzie nowsze dane mają większą wagę, co pozwala lepiej reagować na zmienne warunki rynkowe. Linia ES, jako bardziej konserwatywna miara ryzyka, znajduje się powyżej linii VaR, co wynika z uwzględnienia średnich strat przekraczających próg VaR. W okresach wysokiej zmienności, takich jak rok 2020, obie miary wyraźnie wzrastają, odzwierciedlając rosnące ryzyko, podczas gdy w okresach stabilnych, jak lata 2015–2018, pozostają relatywnie niskie i stabilne. Metoda historyczna z wagami, dzięki uwzględnieniu różnej istotności danych historycznych, oferuje większą elastyczność i lepsze odwzorowanie zmienności rynkowej niż klasyczna metoda historyczna, choć nadal charakteryzuje się skokowym charakterem wyników.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+    geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = EWMA_VaR, color = "VaR"), size = 1.2) +
+  geom_line(aes(y = EWMA_ES, color = "ES"), size = 1.2) +
+  labs(title = "Model EWMA", y = "Wartość", x = "Czas") +
+  theme_minimal() +
+  scale_color_manual(
+    name = "Miary ryzyka",  
+    values = c("VaR" = "skyblue", "ES" = "darkred")
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Wykres przedstawia miary ryzyka Value at Risk (VaR) oraz Expected Shortfall (ES) obliczone za pomocą modelu EWMA, który uwzględnia zmienność zmieniającą się w czasie. Model nadaje większe znaczenie nowszym danym, co pozwala na szybką reakcję na zmiany warunków rynkowych. ES, jako miara uwzględniająca średnią stratę w najgorszych przypadkach, jest wyższa od VaR, co potwierdza jej bardziej konserwatywny charakter. W okresach zwiększonej zmienności, takich jak rok 2020, oba wskaźniki gwałtownie rosną, co odzwierciedla rosnące ryzyko, natomiast w stabilniejszych latach, takich jak 2015–2018, ich wartości pozostają niskie. W porównaniu z metodami historycznymi, model EWMA lepiej odwzorowuje krótkoterminowe zmiany ryzyka, dzięki czemu jest bardziej precyzyjny w dynamicznych warunkach rynkowych.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+    geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = GARCH_VaR, color = "VaR"), size = 1.2) +
+  geom_line(aes(y = GARCH_ES, color = "ES"), size = 1.2) +
+  labs(title = "Model GARCH(1,1)", y = "Wartość", x = "Czas") +
+  theme_minimal() +
+  scale_color_manual(
+    name = "Miary ryzyka",  
+    values = c("VaR" = "skyblue", "ES" = "darkred")
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Wykres przedstawia miary ryzyka Value at Risk (VaR) oraz Expected Shortfall (ES) oszacowane przy użyciu modelu GARCH(1,1), który uwzględnia zmienność warunkową zmieniającą się w czasie. Dzięki zdolności do modelowania heteroskedastyczności, model GARCH(1,1) dokładnie odwzorowuje zmienność ryzyka, reagując dynamicznie na okresy wzmożonej niestabilności rynkowej.Model dobrze oddaje wzrost ryzyka w momentach kryzysowych, takich jak rok 2020, charakteryzujący się wysokimi wartościami obu miar, a także okresy stabilniejsze, jak lata 2015–2018, gdzie wartości ryzyka są relatywnie niższe. W porównaniu do innych metod, model GARCH(1,1) zapewnia bardziej szczegółowe i precyzyjne oszacowanie ryzyka dzięki uwzględnieniu krótkoterminowych fluktuacji zmienności, co czyni go wysoce skutecznym narzędziem w analizie ryzyka finansowego.
+
+### Porównanie technik wyznaczania VaR i ES
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+  geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = Historical_VaR, color = "Metoda historyczna"), size = 1.2) +
+  geom_line(aes(y = Weighted_VaR, color = "Metoda historyczna z wagami"), size = 1.2) +
+  geom_line(aes(y = EWMA_VaR, color = "Model EWMA"), size = 1.2) +
+  geom_line(aes(y = GARCH_VaR, color = "Model GARCH(1,1)"), size = 1.2) +
+  labs(title = "Porównanie technik wyznaczania 99% VaR", 
+       y = "Wartość", 
+       x = "Czas") +
+  theme_minimal() +
+  scale_color_manual(
+    name = "Metody",  
+    values = c(
+      "Stopy zwrotu" = "lightgray",
+      "Metoda historyczna" = "black",
+      "Metoda historyczna z wagami" = "skyblue",
+      "Model EWMA" = "lightpink",
+      "Model GARCH(1,1)" = "purple"
+    )
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Analiza metod wyznaczania 99% Value at Risk (VaR) z uwzględnieniem stóp zwrotu ukazuje różnice w ich zdolności do odwzorowywania zmienności rynkowej. Tradycyjna metoda historyczna, choć intuicyjna i prosta w implementacji, wykazuje ograniczoną zdolność reagowania na dynamiczne zmiany rynkowe, co może prowadzić do niedoszacowania ryzyka w okresach wysokiej zmienności. Wprowadzenie wag w metodzie historycznej częściowo rozwiązuje ten problem, umożliwiając lepsze dostosowanie do bieżących warunków rynkowych. Modele EWMA i GARCH(1,1) wyróżniają się jednak zdolnością do dokładnego modelowania warunkowej zmienności, przy czym GARCH(1,1) szczególnie efektywnie odzwierciedla skoki zmienności w krótkich okresach.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+ggplot(results, aes(x = as.Date(Date))) +
+  geom_line(aes(y = returns[(window_size + 1):length(returns)], color = "Stopy zwrotu"), color = "lightgray") +
+  geom_line(aes(y = Historical_ES, color = "Metoda historyczna"), size = 1.2) +
+  geom_line(aes(y = Weighted_ES, color = "Metoda historyczna z wagami"), size = 1.2) +
+  geom_line(aes(y = EWMA_ES, color = "Model EWMA"), size = 1.2) +
+  geom_line(aes(y = GARCH_ES, color = "Model GARCH(1,1)"), size = 1.2) +
+  labs(title = "Porównanie technik wyznaczania 99% ES", y = "Wartość", x = "Czas") +
+  theme_minimal() +
+  theme_minimal() +
+  scale_color_manual(
+    name = "Metody", 
+    values = c(
+      "Stopy zwrotu" = "lightgray",
+      "Metoda historyczna" = "black",
+      "Metoda historyczna z wagami" = "skyblue",
+      "Model EWMA" = "lightpink",
+      "Model GARCH(1,1)" = "purple"
+    )
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+Wykres ilustruje porównanie różnych metod estymacji 99% Expected Shortfall (ES), w tym metody historycznej, historycznej z wagami, EWMA oraz modelu GARCH(1,1). Modele EWMA i GARCH(1,1) wykazują podobną zdolność do uwzględniania dynamicznych zmian ryzyka, reagując na wzrosty zmienności, szczególnie widoczne w okresach kryzysowych, takich jak rok 2020. GARCH(1,1) dodatkowo precyzyjniej modeluje heteroskedastyczność warunkową, co pozwala na dokładniejsze odwzorowanie ekstremalnych wartości. Metoda historyczna charakteryzuje się stabilnością, lecz jest mniej czuła na nagłe zmiany, podczas gdy metoda historyczna z wagami zapewnia większą adaptacyjność, nadając większą wagę nowszym obserwacjom. 
+
+# Testy wsteczne
+
+Testy wsteczne to kluczowe narzędzie oceny skuteczności modeli ryzyka, takich jak Value at Risk (VaR) i Expected Shortfall (ES). Polegają one na porównaniu przewidywań modelu z rzeczywistymi danymi historycznymi w celu sprawdzenia, czy model poprawnie oszacowuje ryzyko strat. W ramach testów wstecznych stosuje się różne techniki statystyczne, które pozwalają ocenić, czy model jest odpowiednio dostosowany do charakterystyki danych.
+
+## Test Kupca
+
+Test Kupca jest jednym z podstawowych narzędzi służących do weryfikacji poprawności modeli Value at Risk (VaR). Jego celem jest sprawdzenie, czy zaobserwowana częstość przekroczeń prognozowanego VaR (tzn. sytuacji, w których rzeczywista strata przekracza oszacowany VaR) jest zgodna z wartością teoretyczną wynikającą z poziomu ufności modelu. Statystyka testu opiera się na logarytmie ilorazu wiarygodności (LLR), który porównuje prawdopodobieństwo obserwowanych danych dla założonej wartości  p  z alternatywą wynikającą z rzeczywistej częstości przekroczeń. Wysoka wartość LLR wskazuje na niedopasowanie modelu, a wartość  p -value pozwala ocenić, czy różnica jest istotna statystycznie. Test Kupca umożliwia skuteczną ocenę trafności prognoz modeli VaR, identyfikując zarówno nadmierne, jak i zbyt rzadkie oszacowania ryzyka. 
+
+H0: VaR jest dobrze wyznaczony.
+
+H1: VaR nie jest dobrze wyznaczony.
+
+```{r}
+kupiec_test_window <- function(returns, var_values, confidence_level, window_size) {
+  lower_bound <- qbinom(0.025, size = window_size, prob = 1 - confidence_level)
+  upper_bound <- qbinom(0.975, size = window_size, prob = 1 - confidence_level) 
+
+  num_days <- length(var_values)
+
+  within_bounds <- 0
+  outside_bounds <- 0
+
+  for (i in seq_len(num_days)) {
+    if (i + window_size - 1 > length(returns)) break
+    window_returns <- returns[i:(i + window_size - 1)]
+    
+    num_exceedances <- sum(window_returns < -var_values[i])
+
+    if (num_exceedances >= lower_bound && num_exceedances <= upper_bound) {
+      within_bounds <- within_bounds + 1
+    } else {
+      outside_bounds <- outside_bounds + 1
+    }
+  }
+
+  list(
+    within_bounds = within_bounds,
+    outside_bounds = outside_bounds,
+    lower_bound = lower_bound,
+    upper_bound = upper_bound
+  )
+}
+
+kupiec_test_summary <- function(returns, results, confidence_level, window_size) {
+  method_names <- list(
+    "Weighted_VaR" = "Metoda historyczna z wagami",
+    "EWMA_VaR" = "Model  EWMA",
+    "GARCH_VaR" = "Model GARCH(1,1)"
+  )
+
+  summary_table <- data.frame(
+    Metoda = character(),
+    `Brak podstaw do odrzucenia H0` = numeric(),
+    `Odrzucenie H0` = numeric(),
+    check.names = FALSE 
+  )
+
+  for (method in names(method_names)) {
+    var_values <- results[[method]]
+    test_result <- kupiec_test_window(returns, var_values, confidence_level, window_size)
+    summary_table <- rbind(
+      summary_table,
+      data.frame(
+        Metoda = method_names[[method]], 
+        `Brak podstaw do odrzucenia H0` = test_result$within_bounds,
+        `Odrzucenie H0` = test_result$outside_bounds,
+        check.names = FALSE
+      )
+    )
+  }
+
+  return(summary_table)
+}
+
+kupiec_results <- kupiec_test_summary(returns, results, confidence_level, window_size)
+
+kupiec_results %>%
+  kbl(caption = "Wyniki Testu Kupca dla różnych metod",align = "c") %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover"), position = "center")
+```
+
+Wyniki Testu Kupca dla różnych metod oceny Value at Risk (VaR) wskazują, że metoda historyczna z wagami osiągnęła najlepsze wyniki, z 3730 przypadkami, w których nie było podstaw do odrzucenia hipotezy zerowej, co świadczy o wysokiej zgodności liczby przekroczeń VaR z teoretycznym poziomem ryzyka. Model GARCH(1,1) wykazał umiarkowaną skuteczność, z 2581 przypadkami zgodności, jednak aż 1423 przypadki odrzucenia H0 wskazują na pewne trudności w kalibracji modelu. Model EWMA osiągnął najsłabsze wyniki, zaledwie w 2396 przypadkach nie było podstaw do odrzucenia hipotezy zerowej, co oznacza, że liczba przekroczeń w wielu oknach czasowych znacząco odbiegała od oczekiwań. 
+
+
+## Test Świateł
+
+Test świateł to narzędzie służące do oceny jakości modeli Value at Risk (VaR) poprzez klasyfikację liczby przekroczeń w trzech kategoriach: zielonej, żółtej i czerwonej. Test zakłada, że przekroczenia prognozowanego VaR występują z określonym prawdopodobieństwem. Na podstawie liczby obserwowanych przekroczeń obliczane są górne granice przedziałów dla kategorii zielonej (odpowiadającej akceptowalnej liczbie przekroczeń) oraz czerwonej (wskazującej na istotne niedopasowanie modelu). Wyniki testu interpretowane są następująco: kategoria zielona oznacza poprawność modelu, żółta wskazuje na potencjalne problemy, a czerwona sygnalizuje znaczne niedoszacowanie ryzyka przez model. Test świateł jest prostym i intuicyjnym narzędziem, które ułatwia ocenę wiarygodności prognoz ryzyka oraz pozwala na szybką identyfikację modeli wymagających dalszej kalibracji.
+
+```{r}
+traffic_lights_test_window <- function(returns, var_values, confidence_level, window_size) {
+  p <- 1 - confidence_level
+  n <- window_size
+
+  green_upper <- qbinom(0.95, size = n, prob = p)
+  red_upper <- qbinom(0.9999, size = n, prob = p)
+
+  num_days <- length(var_values)
+
+  green <- 0
+  yellow <- 0
+  red <- 0
+
+  for (i in seq_len(num_days)) {
+    if (i + window_size - 1 > length(returns)) break
+    window_returns <- returns[i:(i + window_size - 1)]
+
+    num_exceedances <- sum(window_returns < -var_values[i])
+
+    if (num_exceedances <= green_upper) {
+      green <- green + 1
+    } else if (num_exceedances <= red_upper) {
+      yellow <- yellow + 1
+    } else {
+      red <- red + 1
+    }
+  }
+
+  list(
+    green = green,
+    yellow = yellow,
+    red = red,
+    green_upper = green_upper,
+    red_upper = red_upper
+  )
+}
+
+traffic_lights_summary <- function(returns, results, confidence_level, window_size) {
+  method_names <- list(
+    "Weighted_VaR" = "Metoda historyczna z wagami",
+    "EWMA_VaR" = "Model EWMA",
+    "GARCH_VaR" = "Model GARCH(1,1)"
+  )
+
+  summary_table <- data.frame(
+    Metoda = character(),
+    'Strefa zielona' = numeric(),
+    'Strefa żółta' = numeric(),
+    'Strefa czerwona' = numeric(),
+    check.names = FALSE 
+  )
+
+  for (method in names(method_names)) {
+    var_values <- results[[method]]
+    test_result <- traffic_lights_test_window(returns, var_values, confidence_level, window_size)
+    summary_table <- rbind(
+      summary_table,
+      data.frame(
+        Metoda = method_names[[method]], 
+        'Strefa zielona' = test_result$green,
+        'Strefa żółta' = test_result$yellow,
+        'Strefa czerwona' = test_result$red,
+        check.names = FALSE
+      )
+    )
+  }
+
+  return(summary_table)
+}
+
+traffic_results <- traffic_lights_summary(returns, results, confidence_level, window_size)
+
+traffic_results %>%
+  kbl(caption = "Wyniki Testu Świateł dla różnych metod", align = "c") %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover"), position = "center")
+```
+
+Wyniki testu świateł wskazują, że metoda historyczna z wagami osiągnęła najlepsze wyniki, z 3616 przypadkami w strefie zielonej oraz brakiem przypadków w strefie czerwonej, wskazując na stabilność i dokładność tej metody. Model EWMA wykazał istotne niedoskonałości, co odzwierciedla wysoka liczba przypadków w strefie czerwonej (945) oraz stosunkowo niska liczba przypadków w strefie zielonej (2537). Model GARCH(1,1) osiągnął wyniki lepsze niż EWMA, z 2557 przypadkami w strefie zielonej, ale nadal znacząca liczba przypadków w strefie czerwonej (787) wskazuje na ograniczenia w dokładności prognoz. 
+
+
+## Test Christoffersena
+
+Test Christoffersena to narzędzie oceny jakości modeli Value at Risk (VaR), które uwzględnia nie tylko zgodność liczby przekroczeń z założonym poziomem ufności, ale także ich niezależność w czasie. Analizując przejścia między kolejnymi dniami, test weryfikuje, czy przekroczenia występują losowo, czy też wykazują tendencję do grupowania się, co mogłoby wskazywać na niedoszacowanie ryzyka w określonych okresach. Statystyka logarytmu ilorazu wiarygodności (LLR) porównuje prawdopodobieństwo danych przy założeniu niezależności z alternatywnym modelem zależności czasowej. Wysoka wartość statystyki LLR wskazuje na odchylenia od założonej losowości, a wartość  p -value umożliwia ocenę istotności statystycznej. 
+
+H0: przekroczenia VaR są niezależne w czasie.
+
+H1: przekroczenia VaR nie są niezależne w czasie.
+
+```{r}
+christofferson_test <- function(exceedances) {
+  exceedances <- as.integer(exceedances)
+  if (length(exceedances) < 2) return(NA) 
+
+  transitions <- matrix(0, nrow = 2, ncol = 2)
+  for (i in 2:length(exceedances)) {
+    transitions[exceedances[i - 1] + 1, exceedances[i] + 1] <- transitions[exceedances[i - 1] + 1, exceedances[i] + 1] + 1
+  }
+  
+  u00 <- transitions[1, 1]
+  u01 <- transitions[1, 2]
+  u10 <- transitions[2, 1]
+  u11 <- transitions[2, 2]
+
+  if ((u00 + u01 == 0) || (u10 + u11 == 0)) return(NA) 
+  
+  pi <- (u01 + u11) / (u00 + u01 + u10 + u11)
+  pi01 <- u01 / (u00 + u01)
+  pi11 <- u11 / (u10 + u11)
+  
+  log_likelihood_0 <- (u00 + u01 + u10 + u11) * log(pi) +
+    (u00 + u01) * log(1 - pi) +
+    (u10 + u11) * log(pi)
+  
+  log_likelihood_1 <- u00 * log(1 - pi01) +
+    u01 * log(pi01) +
+    u10 * log(1 - pi11) +
+    u11 * log(pi11)
+  
+  test_stat <- -2 * (log_likelihood_0 - log_likelihood_1)
+  p_value <- 1 - pchisq(test_stat, df = 1)
+  
+  return(p_value < 0.05)
+}
+
+calculate_exceedances <- function(returns, var_values) {
+  exceedances <- returns < var_values
+  if (length(exceedances) != length(var_values)) {
+    stop("Mismatch between returns and VaR values lengths.")
+  }
+  return(exceedances)
+}
+
+results_summary <- tibble(
+  Method = c("Metoda historyczna z wagami", "Model EWMA","Model GARCH(1,1)"),
+  Rejections = 0,
+  NoRejections = 0
+)
+
+methods <- list(
+  "Metoda historyczna z wagami" = results$Weighted_VaR,
+  "Model EWMA" = results$EWMA_VaR,
+  "Model GARCH(1,1)" = results$GARCH_VaR
+)
+
+for (method in names(methods)) {
+  var_values <- methods[[method]]
+  exceedances <- calculate_exceedances(returns[(window_size + 1):length(returns)], var_values)
+  
+  rejections <- sum(sapply(seq_len(4004), function(i) {
+    if ((i + window_size - 1) > length(exceedances)) return(NA) 
+    window_exceedances <- exceedances[i:(i + window_size - 1)]
+    christofferson_test(window_exceedances)
+  }), na.rm = TRUE)
+  
+  results_summary <- results_summary %>%
+    mutate(
+      Rejections = ifelse(Method == method, rejections, Rejections),
+      NoRejections = ifelse(Method == method, 4004 - rejections, NoRejections)
+    )
+}
+
+results_summary %>%
+  kable(
+    format = "html",
+    col.names = c("Metoda", "Odrzucenie H0", "Brak podstaw do odrzucenia H0"),
+    caption = "Wyniki testu Christoffersona dla różnych metod",
+    align = "c"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = TRUE,
+    position = "center"
+  ) %>%
+  column_spec(1, width = "20%") %>%
+  column_spec(2:3, width = "15%")
+```
+
+Wyniki testu Christoffersona wskazują, że metoda historyczna z wagami osiągnęła najlepsze rezultaty, ponieważ w żadnym przypadku nie odrzucono hipotezy zerowej, co oznacza, że wszystkie 4004 okna spełniają założenie niezależności przekroczeń VaR w czasie. Model GARCH(1,1) wykazuje dobrą skuteczność, z 3505 oknami, w których nie było podstaw do odrzucenia hipotezy zerowej, oraz 499 przypadkami, gdzie założenie niezależności zostało zakwestionowane. Model EWMA uzyskał najsłabsze wyniki, z 3175 przypadkami, w których nie wysąpiły podstawy do odrzucenia H0 i 829 przypadkami jej odrzucenia. 
+
+## Analiza wyników testów wstecznych
+
+Poniższa analiza przedstawia rzeczywiste logarytmiczne stopy zwrotu oraz prognozowaną wartość VaR, wskazując przypadki przekroczeń, czyli dni, w których stopy zwrotu przekraczały wartość graniczną ryzyka. Celem tej wizualizacji jest ocena skuteczności poszczególnych metod w przewidywaniu ryzyka finansowego oraz ich zgodności z rzeczywistymi danymi rynkowymi.
+
+```{r echo=FALSE, fig.height=8, fig.width=14, message=FALSE, warning=FALSE}
+aligned_returns <- tail(returns, length(results$Historical_VaR))
+aligned_dates <- tail(daily_returns$Data, length(results$Historical_VaR)) 
+
+ggplot(data = data.frame(
+  Date = aligned_dates,
+  Returns = aligned_returns,
+  VaR = results$Historical_VaR,
+  Exceedance = aligned_returns > results$Historical_VaR
+)) +
+  geom_line(aes(x = Date, y = Returns), color = "grey", size = 0.8, alpha = 0.7) +
+  geom_line(aes(x = Date, y = VaR), color = "black", size = 0.8) +
+  geom_point(data = function(df) df %>% filter(Exceedance), 
+             aes(x = Date, y = Returns), color = "darkred", size = 2) +
+  labs(
+    title = "Przekroczenia VaR - Metoda historyczna",
+    x = "Data",
+    y = "Wartość"
+  )  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+ggplot(data = data.frame(
+  Date = aligned_dates,
+  Returns = aligned_returns,
+  VaR = results$Weighted_VaR,
+  Exceedance = aligned_returns > results$Weighted_VaR
+)) +
+  geom_line(aes(x = Date, y = Returns), color = "grey", size = 0.8, alpha = 0.7) +
+  geom_line(aes(x = Date, y = VaR), color = "black", size = 0.8) +
+  geom_point(data = function(df) df %>% filter(Exceedance), 
+             aes(x = Date, y = Returns), color = "darkred", size = 2) +
+  labs(
+    title = "Przekroczenia VaR - Metoda historyczna z wagami",
+    x = "Data",
+    y = "Wartość"
+  )  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+ggplot(data = data.frame(
+  Date = aligned_dates,
+  Returns = aligned_returns,
+  VaR = results$EWMA_VaR,
+  Exceedance = aligned_returns > results$EWMA_VaR
+)) +
+  geom_line(aes(x = Date, y = Returns), color = "grey", size = 0.8, alpha = 0.7) +
+  geom_line(aes(x = Date, y = VaR), color = "black", size = 0.8) +
+  geom_point(data = function(df) df %>% filter(Exceedance), 
+             aes(x = Date, y = Returns), color = "darkred", size = 2) +
+  labs(
+    title = "Przekroczenia VaR - Model EWMA",
+    x = "Data",
+    y = "Wartość"
+  )  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+
+ggplot(data = data.frame(
+  Date = aligned_dates,
+  Returns = aligned_returns,
+  VaR = results$GARCH_VaR,
+  Exceedance = aligned_returns > results$GARCH_VaR
+)) +
+  geom_line(aes(x = Date, y = Returns), color = "grey", size = 0.8, alpha = 0.7) +
+  geom_line(aes(x = Date, y = VaR), color = "black", size = 0.8) +
+  geom_point(data = function(df) df %>% filter(Exceedance), 
+             aes(x = Date, y = Returns), color = "darkred", size = 2) +
+  labs(
+    title = "Przekroczenia VaR - Model GARCH(1,1)",
+    x = "Data",
+    y = "Wartość"
+  )  + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title = element_text(size = 20),
+    axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+    legend.text = element_text(size = 16),  
+    legend.title = element_text(size = 18)  
+  )
+```
+
+```{r echo=FALSE}
+aligned_returns <- tail(returns, length(results$Historical_VaR))
+aligned_dates <- tail(daily_returns$Data, length(results$Historical_VaR))
+
+exceedances <- data.frame(
+  Metoda = c("Metoda historyczna", 
+             "Metoda historyczna z wagami", 
+             "Model EWMA", 
+             "Model GARCH(1,1)"),
+  Liczba_przekroczeń = c(
+    sum(aligned_returns > results$Historical_VaR),
+    sum(aligned_returns > results$Weighted_VaR),
+    sum(aligned_returns > results$EWMA_VaR),
+    sum(aligned_returns > results$GARCH_VaR)
+  )
+) %>%
+  mutate(
+    Błąd = paste0(round((Liczba_przekroczeń / 4504) * 100, 4), "%") 
+  )
+
+exceedances %>%
+  kbl(
+    caption = "Liczba przekroczeń logarytmicznych stóp zwrotu przez VaR dla każdej z metod",
+    align = "c",
+    col.names = c("Metoda", "Liczba przekroczeń logarytmicznych stóp zwrotu", "Procentowy udział przekroczeń")
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, position = "center")
+```
+
+Powyższa tabela przedstawia liczbę przekroczeń logarytmicznych stóp zwrotu przez prognozowaną wartość VaR oraz ich procentowy udział w stosunku do całkowitej liczby obserwacji dla czterech metod szacowania ryzyka. Wszystkie analizowane metody wykazują zgodność z oczekiwanym poziomem przekroczeń wynoszącym 1%, jednak różnią się nieznacznie pod względem dokładności. Metoda historyczna z wagami charakteryzuje się najniższym udziałem przekroczeń (0,8659%), co wskazuje na jej bardziej konserwatywną naturę w prognozowaniu ryzyka, co znajduje również odzwierciedlenie w wynikach testów wstecznych, gdzie osiągnęła najwyższą zgodność z założeniami. Model EWMA, z udziałem przekroczeń wynoszącym 1,0435%, wykazuje nieco większą liczbę przekroczeń, co może wynikać z jego adaptacyjnego charakteru, jednak w testach wstecznych zidentyfikowano znaczną liczbę odchyleń od oczekiwań, szczególnie w strefie czerwonej Testu Świateł. Najbliższą zgodność z teoretycznym poziomem przekroczeń osiągnęły model GARCH(1,1) (0,9991%) oraz metoda historyczna (0,9769%).Wyniki testów wstecznych (Kupca, Świateł oraz Christoffersona) wskazują na wyraźną przewagę metody historycznej z wagami w estymacji Value at Risk, co wynika z jej statycznego charakteru i bezpośredniego oparcia na danych przeszłych. Modele dynamiczne, takie jak GARCH(1,1) i EWMA, choć lepiej odzwierciedlają zmienność czasową i reagują na aktualne warunki rynkowe, wypadają słabiej w testach wstecznych ze względu na ich adaptacyjny charakter i zależność od bieżących danych. Wyniki te podkreślają ograniczenia testów wstecznych w ocenie modeli zmienności, sugerując, że ich skuteczność powinna być weryfikowana również za pomocą innych miar, które lepiej uwzględniają dynamikę rynku i właściwości prognoz zmienności.
+
+
+# Podsumowanie 
+
+W ramach projektu wyznaczono oraz przeanalizowano Value at Risk (VaR) i Expected Shortfall (ES) za pomocą czterech metod: historycznej, historycznej z wagami, modelu EWMA oraz modelu GARCH(1,1). Dane obejmujące dzienne ceny zamknięcia i logarytmiczne stopy zwrotu zostały szczegółowo opisane i zwizualizowane. Wyniki testów wstecznych pokazały, że choć metoda historyczna z wagami wykazała największą zgodność z założeniami teoretycznymi, a modele EWMA i GARCH miały większe odchylenia, ostatecznie wszystkie metody generowały podobne błędy w prognozowaniu przekroczeń. Wskazuje to, że różnice w efektywności poszczególnych podejść mogą być mniej istotne w praktyce niż oczekiwano. Zaznaczono również ograniczenia testów wstecznych w ocenie modeli zmienności. Projekt podkreśla przydatność każdej z metod, ale jednocześnie sugeruje, że żadna z nich nie jest wolna od ograniczeń w kontekście rzeczywistych danych rynkowych.
+
+
+
