@@ -4,7 +4,7 @@ Repozytorium zawiera wybrane projekty z zakresu analizy danych, ekonometrii, sta
 
 ## Projekty
 
-### 1. COMPARATIVE_ANALYSIS_RNN_STOCK_INDEX_PRICE_PREDICTION
+### 1. ANALIZA_PORÓWNAWCZA_RNN_LSTM_GRU
 Projekt dotyczący prognozowania indeksów giełdowych z wykorzystaniem sieci RNN, LSTM i GRU.
 
 ### 2. EKONOMETRIA_DANYCH_PANELOWYCH
