@@ -28,8 +28,15 @@ index_data["Price"] = index_data["Price"].ffill()
 index_data.index.name = "Date"
 
 # Skalowanie
+split_index = len(index_data) - 20
+train_data = index_data.iloc[:split_index]
+test_data = index_data.iloc[split_index:]
+
 scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(index_data[["Price"]])
+scaler.fit(train_data[["Price"]])
+
+train_scaled = scaler.transform(train_data[["Price"]])
+test_scaled = scaler.transform(test_data[["Price"]])
 
 # Funkcja tworząca sekwencje
 def create_sequences(data, seq_len):
@@ -58,9 +65,8 @@ param_grid = list(product(sequence_lengths, neuron_options, num_layers_list, arc
 # Pętla po konfiguracjach
 for sequence_length, base_neurons, num_layers, arch, batch_size, epochs, dropout_rate in param_grid:
 
-    X, y = create_sequences(scaled_data, sequence_length)
-    X_train, y_train = X[:-20], y[:-20]
-    X_test, y_test = X[-20:], y[-20:]
+    X_train, y_train = create_sequences(train_scaled, sequence_length)
+    X_test, y_test = create_sequences(test_scaled, sequence_length)
     X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
     X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
