@@ -1,0 +1,679 @@
+---
+title: "Projekt2-temat1"
+author: "Kinga Kołodziej"
+date: "2024-12-08"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: "flatly"
+---
+# Wprowadzenie
+
+Redukcja wymiarów to technika stosowana w analizie danych, która pozwala na uproszczenie zestawów danych, zachowując przy tym ich kluczowe informacje. W poniższej pracy porównano dwie popularne metody redukcji wymiarów: Analizę Głównych Składników (PCA) oraz Skalowanie Wielowymiarowe (MDS). PCA jest metodą liniową, której celem jest maksymalizacja wariancji, podczas gdy MDS stara się odwzorować odległości między punktami w przestrzeni o niższym wymiarze. W ramach analizy przeprowadzono krótką eksplorację danych oraz zastosowano obie techniki, porównując ich efektywność i wyniki.
+
+# Wymagane bibilioteki 
+
+```{r message=FALSE, warning=FALSE}
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("mice")
+library(mice)
+#install.packages("tidyr")
+library(tidyr)
+#install.packages("naniar")
+library(naniar)
+#install.packages("psych")
+library(psych)
+#install.packages("factoextra")
+library(factoextra)
+#install.packages("moments")
+library(moments)
+#install.packages("knitr")
+library(knitr)
+#install.packages("kableExtra")
+library(kableExtra)
+#install.packages("FactoMineR")
+library(FactoMineR)
+#install.packages("MASS")
+library(MASS)
+#install.packages("rgl")
+library(rgl)
+#install.packages("htmlwidgets")
+library(htmlwidgets)
+#install.packages("plotly")
+library(plotly)
+#install.packages("vegan")
+library(vegan)
+#install.packages("ecodist")
+library(ecodist)
+```
+
+# Przygotowanie i eksploracyjna analiza danych
+
+W badaniu analizowane były dane dotyczące poziomu rozwoju rynku nieruchomości w największych polskich miastach. Z uwagi na dostępność danych, analiza obejmowała rok 2022 i została ograniczona do miast na prawach powiatu. Miasto Kalisz zostało wyłączone z analizy z powodu braku wystarczających informacji. Źródłem danych wykorzystanych w badaniu były publikacje zawarte w Banku Danych Lokalnych (GUS, 2024).
+
+Zmienne:
+
+X1 - liczba mieszkań w przeliczeniu na 1000 mieszkańców [szt]
+
+X2 - przeciętna powierzchnia użytkowa mieszkania [m2]
+
+X3 - odsetek mieszkań wyposażonych w centralne ogrzewanie [%]
+
+X4 - średnia cena lokali mieszkalnych za metr kwadratowy [zł]
+
+X5 - gęstość zaludnienia [osoba]
+
+X6 - liczba nowych budynków mieszkalnych w przeliczeniu na 1000 mieszkańców [szt]
+
+X7 - liczba pozwoleń wydanych na budowę w przeliczeniu na 1000 mieszkańców [szt]
+
+X8 - liczba transakcji kupna/sprzedaży w przeliczeniu na 1000 mieszkańców [szt]
+
+```{r echo=FALSE}
+data <- read.csv("~/Desktop/ROK 3/Semestr5/Statystyczna analiza danych/Projekt2/data.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+rownames(data) <- data$Miasto
+data <- data[,-1]
+head(data)
+```
+
+```{r echo=FALSE}
+str(data)
+cols_to_clean <- c("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8")
+data[cols_to_clean] <- lapply(data[cols_to_clean], function(x) {
+  x <- gsub(",", ".", x)  
+  x <- gsub(" ", "", x)   
+  as.numeric(x)           
+})
+str(data)
+```
+Wyświetlono strukturę danych w celu identyfikacji typów zmiennych. Zmieniono format wartości i typy zmiennych na numeryczne.
+
+```{r echo=FALSE}
+missing_data <- data %>%
+  summarise_all(~ sum(is.na(.))) %>%
+  pivot_longer(cols = everything(), names_to = "Zmienne", values_to = "Braki")
+
+ggplot(missing_data, aes(x = Zmienne, y = Braki)) +
+  geom_point(color = "darkred", size = 3) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid.major = element_line(color = "grey90"),
+    plot.title = element_text(color = "black", size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Brakujące dane w zmiennych",
+    y = "Liczba braków",
+    x = "Zmienne"
+  )
+```
+
+Na podstawie wykresu ilustrującego liczbę braków danych dla poszczególnych zmiennych można stwierdzić, że w analizowanym zbiorze danych brakujące wartości nie występują.
+
+```{r echo=FALSE}
+descriptive_stats <- function(data) {
+  results <- data %>%
+    summarise_all(list(
+      Minimum = ~ min(., na.rm = TRUE),
+      Maximum = ~ max(., na.rm = TRUE),
+      Średnia = ~ mean(., na.rm = TRUE),
+      Mediana = ~ median(., na.rm = TRUE),
+      "Odchylenie standardowe"  = ~ sd(., na.rm = TRUE),
+      Skośność = ~ skewness(., na.rm = TRUE),
+      Kurtoza = ~ kurtosis(., na.rm = TRUE)
+    )) %>%
+    pivot_longer(everything(), names_to = c("Zmienna", "Statystyka"), names_sep = "_") %>%
+    pivot_wider(names_from = Statystyka, values_from = value)
+
+  results %>%
+    kable(
+      caption = "Statystyki opisowe", 
+      digits = 3,  
+      align = "c"  
+    ) %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed"), 
+      full_width = TRUE,  
+      position = "center" 
+    )
+}
+
+descriptive_stats(data)
+```
+
+W przypadku większości zmiennych, wartości średniej arytmetycznej oraz mediany są ze sobą zbliżone, a skośność przyjmuje wartości bliskie zeru, co w połączeniu z kurtozą zbliżoną do 3 sugeruje, że rozkłady tych zmiennych są zbliżone do rozkładu normalnego. Natomiast w przypadku zmiennej X4, wysoka wartość kurtozy wskazuje na obecność wartości odstających, co zostało dodatkowo potwierdzone przez analizę wykresów pudełkowych. W celu dalszej obróbki danych, wartości odstające zostały zamienione na wartości średnie, co pozwoliło na zminimalizowanie ich wpływu na dalszą analizę. 
+
+```{r echo=FALSE}
+find_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  lower <- Q1 - 1.5 * IQR
+  upper <- Q3 + 1.5 * IQR
+  which(x < lower | x > upper)
+}
+
+outliers <- lapply(data, find_outliers)  
+names(outliers) <- names(data)
+
+par(mfrow = c(2, 4))  
+for (i in 1:ncol(data)) { 
+  boxplot(data[, i],
+          ylab = as.character(names(data)[i]),
+          col = "white",
+          border = "black",
+          horizontal = FALSE)
+}
+```
+
+```{r echo=FALSE}
+replace_outliers_with_mean <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  lower <- Q1 - 1.5 * IQR
+  upper <- Q3 + 1.5 * IQR
+  outliers <- which(x < lower | x > upper)
+  x[outliers] <- mean(x[-outliers], na.rm = TRUE)
+  return(x)
+}
+
+original_rownames <- rownames(data)
+
+data <- data.frame(lapply(data, replace_outliers_with_mean))
+
+rownames(data) <- original_rownames
+
+```
+
+```{r echo=FALSE}
+test_shapiro <- function(data) {
+  results <- data %>%
+    summarise(across(everything(), ~ {
+      if (is.numeric(.)) {
+        test <- shapiro.test(.)
+        tibble(
+          p_value = test$p.value,
+          conclusion = ifelse(test$p.value < 0.05, "Odrzucenie hipotezy zerowej", "Brak podstaw do odrzucenia hipotezy zerowej")
+        )
+      } else {
+        tibble(
+          p_value = NA,
+          conclusion = NA
+        )
+      }
+    }, .names = "{.col}")) %>%
+    pivot_longer(everything(), names_to = "Variable", values_to = "Result") %>%
+    unnest(Result)
+
+  results %>%
+    kable(
+      caption = "Wyniki testu Shapiro-Wilka", 
+      col.names = c("Zmienna", "p-value", "Wniosek"),
+      digits = 3,  
+      align = "c"
+    ) %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed"), 
+      full_width = TRUE,  
+      position = "center" 
+    )
+}
+
+test_shapiro(data)
+```
+
+Na poziomie istotności 0,05, wyniki testu Shapiro-Wilka wskazują, że dla zmiennych X1, X2, X5 oraz X6 nie ma podstaw do odrzucenia hipotezy zerowej, co sugeruje, że rozkłady tych zmiennych są zgodne z rozkładem normalnym. Natomiast dla zmiennych X3, X4, X7 i X8, p-value jest mniejsze niż 0,05, co prowadzi do odrzucenia hipotezy zerowej, a tym samym wskazuje na istotne odchylenie od normalności tych rozkładów. W kontekście technik analizy danych jak analiza głównych składowych (PCA) czy wielowymiarowa skala podobieństwa (MDS), normalność rozkładu danych nie jest wymaganym założeniem.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+correlation_matrix <- cor(data, use = "complete.obs", method = "pearson")
+
+library(corrplot)
+
+corrplot(correlation_matrix, method = "color", type = "upper",
+         col = colorRampPalette(c("darkgrey", "white", "darkred"))(200),
+         tl.col = "black", tl.srt = 45, number.cex = 0.7, addCoef.col = "black")
+
+```
+
+Analiza korelacji ujawnia kilka istotnych zależności między zmiennymi, w tym silne i umiarkowane powiązania. Szczególnie zauważalne są korelacje między zmiennymi X1 i X2 (ujemna korelacja), X5 i X6 (dodatnia korelacja), oraz X2 i X5 (dodatnia korelacja). Te zmienne wykazują wyraźne współzależności, które mogą sugerować istnienie wspólnych mechanizmów wpływających na ich zmiany. W przypadku pozostałych zmiennych, korelacje są słabsze, co wskazuje na mniej wyraźne powiązania między nimi.
+
+# Analiza składowych głównych
+
+Kolejne kroki analizy głównych składowych prowadzą do skonstruuowania nowej przestrzeni obserwacji, w której wyjściowe zmienne są zastąpione nowymi, nazywanymi głównymi składowymi. Każda z głównych składowych jest liniową funkcją wyjściowych zmiennych, dzięki czemu nowa przestrzeń obserwacji przechowuję tę samą informację. Główne składowe są jednak wyznaczone w taki sposób, że pierwsza z nich wyjaśnia największą część obserwowanej zmienności, a każda kolejna jest do niej ortogonalna i odpowiada za mniejszą część wariancji. Dzięki temu PCA umożliwia zastąpienie zbioru skorelowanych ze sobą zmiennych zbiorem nieskorelowanych głównych składowych z zachowaniem znacznej większości infomacji. Algorytm wyznaczania głównych składowych można przedstawić w następujących krokach:
+
+- Transformacja danych wyjściowych
+- Wyznaczanie macierzy kowariancji (korelacji)
+- Wyznaczanie wartości i wektorów własnych
+- Obliczanie wartości głównych składowych
+- Analiza wartości składowych głównych
+
+## Transformacja danych wyjściowych 
+
+Standaryzacja jest ważnym krokiem w analizie danych, szczególnie w metodach takich jak analiza głównych składowych (PCA), które są wrażliwe na różnice w skali poszczególnych zmiennych. Jeżeli zmienne mają różne jednostki miary (np. ceny nieruchomości w tysiącach złotych i powierzchnia w metrach kwadratowych), to większe zmienne mogą dominować w analizie, co zniekształci wyniki. Standaryzacja danych sprawia, że każda zmienna wnosi równą wagę do analizy.
+
+```{r}
+data_standardized <- scale(data, center = TRUE, scale = TRUE)
+```
+
+## Wyznaczenie macierzy korelacji
+
+W przypadku analizy składowych głównych korelacja między zmiennymi jest kluczowa, ponieważ PCA opiera się na znalezieniu głównych składowych, które maksymalizują wariancję w danych. Jeśli zmienne są silnie skorelowane, PCA będzie w stanie zredukować wymiary, łącząc te zmienne w nowe, bardziej skondensowane zmienne (główne składowe). Ze względu na różnorodność skali zmiennych zastosowano macierz korelacji.
+
+```{r}
+Mcor <- cor(data_standardized)
+Mcor
+```
+
+Macierz korelacji dostarcza istotnych informacji na temat struktury zależności w analizowanym zbiorze danych. Silne korelacje, takie jak te między zmiennymi X2 a X7 (0.637) oraz X6 a X7 (0.685), wskazują na wyraźne powiązania między tymi zmiennymi, które mogą zostać skumulowane w jednej z głównych składowych, reprezentującej wspólne źródło wariancji. Z kolei zmienne o słabych korelacjach, jak X1 i X3 (-0.064) czy X1 i X4 (0.396), wskazują na mniejsze współzależności, co może skutkować ich rozdzieleniem na różne składowe główne, umożliwiając uchwycenie odrębnych aspektów zmienności w zbiorze danych. Warto również zauważyć, że obecność korelacji o ujemnym znaku, takich jak X2 i X5 (-0.419) czy X6 i X8 (-0.238), może sugerować istnienie przeciwnych tendencji w tych zmiennych, co może prowadzić do wyodrębnienia składowych głównych, które uwzględniają odwrotne kierunki zmienności. 
+
+### Test Bartletta
+
+```{r}
+n_observations <- nrow(data_standardized)
+bartlett_test <- cortest.bartlett(Mcor, n = n_observations)
+print(bartlett_test)
+```
+Test Bartletta bada hipotezę zerową, że macierz korelacji w zbiorze danych jest macierzą jednostkową, tzn. że zmienne są ze sobą niezależne. Hipoteza alternatywna zakłada, że macierz korelacji zawiera istotne zależności między zmiennymi.Wartość p (mniejsza niż 0.05) pozwala odrzucić hipotezę zerową, co oznacza, że dane wykazują istotne zależności między zmiennymi i są odpowiednie do przeprowadzenia analizy PCA. Zmienne są ze sobą powiązane, a więc analiza głównych składowych może prowadzić do uzyskania użytecznych wyników.
+
+### Test Kaiser-Meier-Olkin (KMO)
+
+```{r}
+kmo_result <- KMO(Mcor)
+print(kmo_result)
+```
+Test KMO (Kaiser-Meyer-Olkin) służy do oceny adekwatności danych do analizy czynnikowej, określając, w jakim stopniu zmienność poszczególnych zmiennych może być wyjaśniona przez wspólne czynniki. Uzyskany ogólny wynik MSA na poziomie 0.63 wskazuje na umiarkowaną adekwatność danych do przeprowadzenia analizy czynnikowej. Zgodnie z przyjętymi standardami, wartość wskaźnika KMO powyżej 0.5 uznaje się za akceptowalną, przy czym wyższe wartości świadczą o lepszej przydatności danych do tego rodzaju analizy. Analiza MSA dla poszczególnych zmiennych wykazała, że zmienne X3 (0.44) oraz X4 (0.47) mają wartości poniżej progu 0.5, co sugeruje ich ograniczoną użyteczność w kontekście analizy czynnikowej. W związku z tym, zostały one wykluczone z dalszych etapów analizy. Pozostałe zmienne, posiadające wartości MSA powyżej 0.5, wskazują na odpowiednią korelację z innymi zmiennymi, co umożliwia ich włączenie do modelu czynnikowego, przyczyniając się do wyjaśnienia istotnej części wariancji danych.
+
+```{r}
+data_standardized <- data_standardized[, !(colnames(data_standardized) %in% c("X3", "X4"))]
+```
+
+
+```{r}
+pca <- prcomp(data_standardized)
+```
+
+Funkcja prcomp() w języku R służy do przeprowadzania analizy głównych składowych (PCA) na zestawie danych. Za pomocą rozkładu wartości osobliwych (SVD - Singular Value Decomposition), obliczane są główne składowe, które są kombinacjami liniowymi zmiennych wyjściowych. Funkcja ta zwraca obiekt zawierający szereg istotnych wyników analizy, w tym:
+
+- sdev – standardowe odchylenia głównych składowych, które odpowiadają pierwiastkom kwadratowym z wartości własnych macierzy współczynnika korelacji. Zmienność każdej składowej jest miarą jej siły w wyjaśnianiu ogólnej zmienności danych.
+
+- rotation – macierz ładunków, która zawiera współczynniki każdej z głównych składowych dla każdej zmiennej. Są to tzw. wektory własne macierzy współczynnika korelacji 
+
+- x – współrzędne nowych zmiennych (składowych) w przestrzeni głównych składowych, uzyskane przez przekształcenie pierwotnych danych za pomocą macierzy ładunków. 
+
+## Wyznaczenie wektorów własnych
+
+```{r}
+pca$rotation
+```
+
+Macierz ładunków głównych składowych przedstawia, w jaki sposób poszczególne zmienne wpływają na każdą z głównych składowych. W pierwszej składowej (PC1) największy wpływ mają zmienne X2, X6 i X7, podczas gdy X1 ma wpływ odwrotny. Druga składowa (PC2) jest głównie kształtowana przez X8 i X6, a trzecia (PC3) przez X5, wskazując na ich dominujący wkład w wyjaśnianie wariancji danych. W kolejnych składowych dominują inne zmienne, jak X2 i X1 w PC6. Analiza ta pozwala na identyfikację zmiennych o największym wpływie na daną składową oraz ułatwia zrozumienie, które zmienne są kluczowe w wyjaśnianiu zmienności.
+
+## Wyznaczenie wartości własnych
+
+```{r}
+pca$sdev^2
+```
+
+Wartości własne reprezentują rozkład wariancji wyjaśnianej przez poszczególne główne składowe. Składowa PC1 wyjaśnia największą część wariancji, osiągając wartość 3.21, co wskazuje na jej dominującą rolę w strukturze danych. Kolejne składowe, takie jak PC2 (1.04) i PC3 (0.71), również mają istotny wpływ, choć w mniejszym stopniu. Składowe PC4 (0.54), PC5 (0.31) oraz PC6 (0.18) wyjaśniają coraz mniejszy procent całkowitej wariancji, co sugeruje ich mniejsze znaczenie w kontekście analizy. W związku z tym, główne składowe o najwyższych wartościach wariancji (PC1, PC2, PC3) mają kluczowe znaczenie dla dalszej interpretacji i redukcji wymiarów, umożliwiając uchwycenie istotnych informacji w danych przy jednoczesnej redukcji złożoności.
+
+## Obliczenie wartości składowych głównych
+
+```{r}
+pca$x
+```
+
+Wynik pca$x reprezentuje przekształcone dane. Każda wartość w tej macierzy wskazuje, jak poszczególna obserwacja jest reprezentowana w nowych, ortogonalnych przestrzeniach głównych składowych. Macierz ta zawiera kombinacje liniowe pierwotnych zmiennych, które zostały przekształcone na osie odpowiadające głównym składowym. Przekształcone dane mogą być następnie wykorzystywane do dalszych analiz, takich jak wizualizacja danych w niższych wymiarach czy klasyfikacja, umożliwiając łatwiejsze wykrywanie wzorców i zależności w dużych zbiorach danych.
+
+## Analiza wartości składowych głównych 
+
+```{r}
+summary(pca)
+```
+```{r echo=FALSE}
+fviz_eig(pca, addlabels = TRUE, barfill = rgb(188 / 255, 117 / 255, 119 / 255), barcolor = "darkred")
+```
+
+Analiza wyników PCA wykazuje, że pierwsza składowa (PC1) wyjaśnia 53,53% całkowitej wariancji w danych, co sugeruje, że jest to najistotniejszy komponent pod względem zmienności. Druga składowa (PC2) wnosi 17,38% wariancji, co czyni ją drugą najważniejszą w kontekście struktury danych. Razem, PC1 i PC2 wyjaśniają 70,91% całkowitej zmienności, co stanowi znaczną część informacji zawartej w pierwotnych zmiennych. Trzecia składowa (PC3), z wynikiem 11,78%, przyczynia się dodatkowo do wyjaśnienia zmienności, a w połączeniu z PC1 i PC2 osiąga 82,70% wariancji. Pozostałe składowe (PC4, PC5 i PC6) mają coraz mniejszy wpływ na dane, z udziałami w wariancji odpowiednio 9%, 5,25% i 3,06%. Wyniki te sugerują przyjęcie dwóch lub trzech składowych głównych. Wykres graficznie ilustruje spadek udziału wariancji wyjaśnianej przez kolejne komponenty.
+
+
+```{r echo=FALSE}
+eigenvalues <- pca$sdev^2 
+
+kaiser_components <- sum(eigenvalues > 1)
+
+jolliffe_components <- sum(eigenvalues > 0.7)
+
+proportion_variance <- eigenvalues / sum(eigenvalues)
+cumulative_variance <- cumsum(proportion_variance)
+components_70 <- which(cumulative_variance >= 0.7)[1]
+
+cattell_components <- 2  
+
+results <- data.frame(
+  Kryterium = c("Kryterium Kaisera", "Kryterium Jolliffe'a", "Wyjaśniona część zmienności (70%)", "Test Cattella"),
+  Liczba_skladowych = c(kaiser_components, jolliffe_components, components_70, cattell_components)
+)
+
+kable(results, col.names = c("Kryterium", "Liczba składowych"), align = "c", caption = "Porównanie sugerowanej liczby głównych składowych przez wybrane kryteria doboru") %>%
+  kable_styling(full_width = TRUE, position = "center", bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+W wyniku analizy głównych składowych (PCA) dokonano oceny liczby składowych na podstawie różnych kryteriów doboru. Zgodnie z kryterium Kaisera, które zaleca zachowanie jedynie tych składowych, których wartości własne są większe niż 1, wybrano dwie główne składowe. Kryterium Jolliffe'a, które sugeruje, że wartości własne powyżej 0,7 są wystarczające do wyjaśnienia istotnej części wariancji, wskazuje na trzy składowe. Natomiast przy przyjęciu progu wyjaśnionej wariancji na poziomie 70%, wybór padł na dwie pierwsze składowe, które łącznie wyjaśniają 70,92% zmienności danych. Ostatecznie, zgodnie z testem Cattella, bazującym na interpretacji wykresu osypiska, także wskazano na dwie główne składowe. W związku z tym, biorąc pod uwagę, że trzy z czterech kryteriów sugerowały wybór dwóch składowych, zdecydowano się na przeprowadzenie analizy PCA w przestrzeni dwuwymiarowej.
+
+```{r echo=FALSE}
+fviz_contrib(pca, choice = "var", axes = 1, fill = rgb(188 / 255, 117 / 255, 119 / 255), color = "darkred") 
+```
+
+Wykres przedstawiający kontrybucję zmiennych do pierwszej składowej głównej pozwala na ocenę, które zmienne mają największy wpływ na kierunek tej składowej. W tym przypadku decydujący wpływ na komponent pierwszy mają zmienne X2, X1, X7 oraz X6.
+
+```{r echo=FALSE}
+fviz_contrib(pca, choice = "var", axes = 2, fill = rgb(188 / 255, 117 / 255, 119 / 255), color = "darkred")
+```
+
+Z kolei największy wpływ na komponent drugi mają zmienne X8, X7 oraz X6.
+
+```{r echo=FALSE}
+fviz_contrib(pca, choice = "var", axes = 1:2, fill = rgb(188 / 255, 117 / 255, 119 / 255), color = "darkred")
+```
+
+Wykres przedstawiający kontrybucję zmiennych do pierwszych dwóch składowych głównych umożliwia ocenę, jak każda zmienna przyczynia się do obu wybranych osi w analizie głównych składowych (PCA). Zmienne, które mają największy wpływ na te dwie składowe to : X7, X8, X6, X2 oraz X1.
+
+```{r echo=FALSE}
+fviz_pca_var(pca, col.var = "contrib", repel = TRUE, gradient.cols = c("darkblue", "red"))
+```
+
+Wykres ładunków czynnikowch ilustruje rozkład zmiennych w przestrzeni głównych składowych w kontekście ich kontrybucji do całkowitej zmienności w danych. Długość wektora reprezentuje zasób informacyjny zmiennej pierwotnej,jaki niosą składowe wyznaczające układ współrzędnych.Znak współrzędnych końca wektora wskazuje na dodatnią lub ujemną korelację zmiennej pierwotnej i składowych głównych tworzących układ współrzędnych. Kąt między wektorami wskazuje na skorelowanie zmiennych pierwotnych. W kontekście analizowanego zbioru danych i zeskalowaniu danych na dwa wymiary, najwiekszy udział w zmienności tłumaczonego przez zmienne zjawiska mają zmienne X8, X7 oraz X6. Zmienne X2, X6 oraz X7 są dodatnio skorelowane z pierwszą składową, natomiast w przypadku pozostałych jest to ujemna korelacja. Wszystkie zmienne są dodatnio skorelowane ze składową drugą. 
+
+```{r echo=FALSE}
+cor_matrix <- cor(data_standardized, pca$x[, 1:2])
+cor_matrix %>%
+  kable(
+    digits = 3,  
+    caption = "Korelacja między zmiennymi a głównymi składowymi PCA", 
+    align = "c"  
+  ) %>%
+  kable_styling(
+    full_width = TRUE,  
+    position = "center", 
+    bootstrap_options = c("striped", "hover", "condensed")  
+  )
+```
+
+Analiza korelacji zmiennych pierwotnych z głównymi składowymi PCA ujawnia, które zmienne w największym stopniu wpływają na poszczególne wymiary reprezentacji danych. Pierwsza składowa główna (PC1) wykazuje silną dodatnią korelację ze zmiennymi X2 (0.847), X7 (0.774) i X6 (0.745), co wskazuje na ich dominujący wpływ w konstrukcji tego wymiaru. Jednocześnie PC1 jest silnie ujemnie skorelowana z X1 (-0.778), X5 (-0.625) i X8 (-0.587), co sugeruje, że wzrost tych zmiennych jest odwrotnie proporcjonalny do wartości PC1. Druga składowa główna (PC2) z kolei charakteryzuje się najwyższą dodatnią korelacją z X8 (0.667) oraz umiarkowaną z X6 (0.447) i X7 (0.454), co oznacza, że te zmienne w istotny sposób definiują ten wymiar. Pozostałe zmienne, takie jak X1 (0.348), X5 (0.227) i X2 (0.141), mają mniejszy wkład w PC2, co sugeruje ich ograniczony wpływ na strukturę drugiego wymiaru. Te wyniki podkreślają hierarchię znaczenia zmiennych w modelu PCA oraz pozwalają na lepsze zrozumienie ich wzajemnych relacji w wielowymiarowej przestrzeni danych.
+
+```{r echo=FALSE, fig.height=10, fig.width=10}
+biplot(pca, scale = 0, xlim = c(-6, 6), ylim = c(-4, 3))
+```
+
+Biplot prezentujący wyniki analizy głównych składowych umożliwia szczegółową analizę zarówno zmiennych, jak i obserwacji (miast na prawie powiatu) w kontekście ich zróżnicowania w przestrzeni dwóch pierwszych głównych składowych. Wykres pozwala dostrzec pewne wzorce w danych oraz identyfikować podobieństwa i różnice między jednostkami obserwacyjnymi.  
+
+Obserwacje znajdujące się blisko siebie na biplocie są podobne pod względem analizowanych zmiennych, natomiast większe odległości między nimi świadczą o różnicach w ich cechach. Na przykład, miasta Kraków, Wrocław i Rzeszów, które znajdują się w górnej części wykresu, wykazują wyższe wartości dla zmiennej X8. Oznacza to, że te powiaty są bardziej powiązane z tą cechą i wyróżniają się na tle pozostałych. Z kolei miasta Wałbrzych, Szczecin i Włocławek, znajdujące się w dolnej części biplotu, są zlokalizowane w przeciwnym kierunku względem wektora X8, co sugeruje, że cecha ta przybiera u nich relatywnie niskie wartości.
+
+W centralnej części biplotu można zaobserwować skupisko miast, co wskazuje na ich podobieństwo pod względem analizowanych zmiennych. Miasta Kielce, Opole, i Tarnobrzeg znajdują się blisko siebie oraz blisko środka układu współrzędnych, co sugeruje, że nie różnią się one znacząco od średnich wartości dla poszczególnych zmiennych.
+
+Dodatkowo, analiza kierunków i długości wektorów zmiennych pozwala lepiej zrozumieć ich wpływ na poszczególne miasta. Zmienna X2, której wektor jest skierowany w lewo, ma duży wpływ na miasta zlokalizowane w lewym obszarze biplotu, takie jak Poznań i Gdańsk. Oznacza to, że te jednostki charakteryzują się wyższymi wartościami zmiennej X2, przy jednocześnie niższych wartościach innych zmiennych. Z kolei zmienne X6 i X7, które są skierowane w podobnym kierunku (w górę i na prawo), silnie wpływają na miasta Zielona Góra i Bielsko-Biała, co wskazuje na podobny profil tych obserwacji.
+
+Kąt pomiędzy wektorami zmiennych X6 i X7, który jest niewielki, sugeruje silną dodatnią korelację między tymi cechami. Z kolei zmienna X1, której wektor jest skierowany w przeciwnym kierunku względem X2, wykazuje z nimi silną korelację ujemną. Interpretując obserwacje pod kątem tych zależności, można zauważyć, że powiaty z obszarów przeciwnych względem X1 cechują się wyższymi wartościami tej zmiennej, podczas gdy te znajdujące się w kierunku X2 przyjmują odwrotną tendencję.
+
+Podsumowując, biplot ujawnia nie tylko wpływ poszczególnych zmiennych na różnicowanie obserwacji, ale także ich relacje wzajemne. Dzięki tej wizualizacji można zidentyfikować grupy miast o podobnym profilu cech oraz wyróżniające się jednostki, takie jak miasta Kraków i Wrocław, które w sposób jednoznaczny różnią się od reszty badanych jednostek. To pozwala na pogłębioną analizę struktury danych oraz wyciąganie wniosków o specyfice badanych obserwacji.
+
+
+## Interpretacja wyników PCA
+
+Wykres biplot dla analizy głównych składowych (PCA) wyraźnie wskazuje na trzy grupy miast, które różnią się pod względem rozwoju rynku nieruchomości w Polsce w 2022 roku.
+
+Grupa miast o wysokiej aktywności rynkowej, czyli Kraków, Wrocław, Rzeszów jest wyraźnie oddzielona od reszty. Miasta te wyróżnia wysoka dynamika rozwoju rynku nieruchomości. Kraków, Wrocław i Rzeszów charakteryzują się silnym popytem na mieszkania, większą liczbą transakcji na rynku nieruchomości, wyższymi cenami nieruchomości oraz intensywniejszymi inwestycjami w budownictwo. Te ośrodki przyciągają dużą liczbę mieszkańców i inwestorów, co przekłada się na bardziej rozwiniętą infrastrukturę oraz wyższą liczbę pozwoleń na budowę i nowych budynków. Wykres wskazuje, że te miasta są liderami w zakresie aktywności rynkowej w Polsce.
+
+Grupa miast o mniejszym rozwoju rynku nieruchomości (Wałbrzych, Włocławek, Szczecin) wyróżnia  zdecydowanie niższy poziom aktywności na rynku nieruchomości. Ich rozwój jest ograniczony przez mniejszy popyt na mieszkania, niższe ceny nieruchomości oraz mniejszą liczbę nowych inwestycji budowlanych. Te miasta borykają się z problemami strukturalnymi, takimi jak wyludnianie się czy mniejsza atrakcyjność dla inwestorów. Wykresy wskazują na ich niższą dynamikę rozwoju rynku nieruchomości w porównaniu do większych ośrodków miejskich.
+
+Grupa miast o umiarkowanym rozwoju rynku nieruchomości (centralne skupisko miast), reprezentuje obszary o umiarkowanym poziomie aktywności rynkowej. Są to ośrodki, które wykazują średnią dynamikę na rynku nieruchomości. Cechuje je zrównoważony rozwój, który nie jest ani tak dynamiczny jak w Krakowie czy Wrocławiu, ani tak ograniczony jak w Wałbrzychu czy Szczecinie. Miasta te znajdują się w fazie stabilnego rozwoju rynku nieruchomości, z równowagą między podażą i popytem, jednak bez dużych skoków inwestycyjnych czy spekulacyjnych. Wykres pokazuje, że te ośrodki plasują się pośrodku, nie wykazując skrajnych wartości w żadnym z wymiarów.
+
+Warto zauważyć, że analiza głównych składowych (PCA) pozwala na wyodrębnienie wyraźnych grup miast, które różnią się między sobą poziomem rozwoju rynku nieruchomości. Dzięki PCA możliwe jest zredukowanie wymiarowości danych, co pozwala na identyfikację ukrytych wzorców w danych, takich jak różnice w aktywności na rynku nieruchomości. Zastosowanie tej metody umożliwia wskazanie regionów w Polsce, które charakteryzują się wysokim potencjałem rozwoju rynku nieruchomości, a także tych, które napotykają trudności związane z ograniczonymi inwestycjami oraz niższym popytem. PCA umożliwia zatem lepsze zrozumienie struktury danych i ułatwia identyfikację miast z bardziej dynamicznymi rynkami nieruchomości, jak również tych, które wymagają większego wsparcia rozwojowego.
+
+
+# Metody skalowania wielowymiarowego
+
+Wielowymiarowe skalowanie (MDS) to zbiór metod analizy danych wielowymiarowych, które służą do badania podobieństw lub różnic w danych. Jedną z głównych zalet MDS jest możliwość przedstawienia (nie)podobieństw między parami obiektów jako odległości między punktami w przestrzeni niskowymiarowej. Innymi słowy, MDS umożliwia wizualizację (nie)podobieństw w przestrzeni niskowymiarowej, co pozwala na eksplorację i inspekcję danych w bardziej przystępnej formie.
+
+Ogólne podejście w MDS polega na obliczeniu macierzy (nie)podobieństw pomiędzy parami obiektów (np. obserwacjami, jednostkami, próbkami), a następnie zastosowaniu jednego z dostępnych „modeli” MDS w celu uzyskania reprezentacji w przestrzeni niskowymiarowej. Wybór odpowiedniego modelu MDS zależy od rodzaju analizowanych danych oraz typu miary (nie)podobieństwa, którą zdecyduje się wykorzystać analityk.
+
+## Klasyczne skalowanie metryczne
+
+Klasyczne skalowanie metryczne zakłada, że macierz odległości  powstała na bazie odległości euklidesowej. To skalowanie odpowiada metodzie PCA, z tą różnicą, że puntem wyjścia jest macierz euklidesowych odległości.
+
+Algorytm skalowania jest następujący (jednokrokowy):
+
+- Wyznaczenie macierzy kwadratów odległości
+
+- Wycentrowanie macierzy kwadratów odległości
+
+- Wyznacznie wartości oraz wektorów własnych wycentrowanej macierzy odległości
+
+- Wyznaczenie współrzędnych obiektów
+
+Funkcja cmdscale() z pakietu MASS realizuje klasyczne skalowanie metryczne.
+
+```{r}
+dist_matrix <- dist(data_standardized, method = "euclidean") 
+
+cmdscale_result1 <- cmdscale(dist_matrix, k = 2)  
+
+reduced_distances1 <- dist(cmdscale_result1)
+
+cmdscale_stress1 <- sqrt(sum((as.vector(dist_matrix) - as.vector(reduced_distances1))^2) /              sum(as.vector(dist_matrix)^2))
+
+```
+
+```{r echo=FALSE}
+cmdscale_df <- as.data.frame(cmdscale_result1)
+colnames(cmdscale_df) <- c("Dim1", "Dim2")
+
+cmdscale_df$City <- rownames(data_standardized)
+
+ggplot(cmdscale_df, aes(x = Dim1, y = Dim2, label = City)) +
+  geom_point(color = "darkred", size = 3) +
+  geom_text(vjust = -1, size = 3) +
+  labs(
+    title = paste("Klasyczne Skalowanie Metryczne (Stress:", round(cmdscale_stress1, 3), ")"),
+    x = "Dim 1",
+    y = "Dim 2"
+  ) +
+  theme_minimal()
+```
+
+Wartość współczynnika Stress uzyskana w analizie MDS wyniosła 0,258, co wskazuje na bardzo słabe dopasowanie modelu do danych w przypadku skalowania do dwóch wymiarów. W związku z tym, w kolejnym kroku zdecydowano się na przeprowadzenie skalowania w przestrzeni trójwymiarowej, aby poprawić jakość odwzorowania i uzyskać bardziej adekwatne wyniki.
+
+```{r}
+cmdscale_result2 <- cmdscale(dist_matrix, k = 3)  
+
+reduced_distances2 <- dist(cmdscale_result2)
+
+cmdscale_stress2 <- sqrt(sum((as.vector(dist_matrix) - as.vector(reduced_distances2))^2) / 
+               sum(as.vector(dist_matrix)^2))
+```
+
+```{r echo=FALSE}
+plot_ly(
+  x = cmdscale_result2[, 1],  
+  y = cmdscale_result2[, 2],  
+  z = cmdscale_result2[, 3],  
+  type = "scatter3d",       
+  mode = "markers",          
+  marker = list(color = "darkred", size = 5)  
+) %>%
+  layout(
+    title = paste("Klasyczne Skalowanie Metryczne<br>(Stress:", round(cmdscale_stress2, 3), ")"),
+    scene = list(
+      xaxis = list(title = "Dim 1"),
+      yaxis = list(title = "Dim 2"),
+      zaxis = list(title = "Dim 3")
+    )
+  )
+```
+
+
+Przeprowadzenie skalowania wielowymiarowego (MDS) w przestrzeni trójwymiarowej pozwoliło na obniżenie wartości współczynnika Stress do poziomu 0,156. Jest to znacząca poprawa w porównaniu z analizą dwuwymiarową, co świadczy o lepszym dopasowaniu modelu do danych. Chociaż wynik 0,156 nadal wskazuje na słabe dopasowanie, sugeruje on, że odwzorowanie relacji między obserwacjami w trzech wymiarach jest znacznie bardziej zgodne z oryginalnymi odległościami w przestrzeni wielowymiarowej. Redukcja współczynnika Stress oznacza, że uzyskana reprezentacja trójwymiarowa lepiej oddaje rzeczywiste podobieństwa i różnice między obiektami. W związku z tym zdecydowano się na zastosowanie innych metod analizy wymiarowej, które mogą lepiej odwzorować strukturę danych i uchwycić bardziej złożone relacje między obserwacjami.
+
+##  Nieliniowe mapowanie Sammona
+
+Metoda Sammona, będąca alternatywą dla klasycznego skalowania wielowymiarowego i PCA, jest nieliniowym podejściem do redukcji wymiarowości. W przeciwieństwie do PCA, które opiera się na przekształceniach liniowych, metoda Sammona stara się dopasować próbki do określonej przestrzeni, a następnie optymalizuje ich rozmieszczenie w tej przestrzeni, minimalizując współczynnik Stress. Proces ten uwzględnia metryczne odległości pomiędzy punktami, co sprawia, że wybór miary odległości ma kluczowe znaczenie. Jednocześnie metoda ta pozwala na nieliniowe ważenie błędów, co odróżnia ją od podejść takich jak PCA czy klasyczne skalowanie wielowymiarowe (cmdscale).
+
+```{r}
+sammons_result1 <- MASS::sammon(dist_matrix, k = 2)
+```
+
+```{r echo=FALSE}
+sammon_stress1 <- sammons_result1$stress
+
+sammon_points1 <- sammons_result1$points
+
+sammon_df <- as.data.frame(sammon_points1)
+colnames(sammon_df) <- c("Dim1", "Dim2")
+
+sammon_df$City <- rownames(data_standardized)
+
+ggplot(sammon_df, aes(x = Dim1, y = Dim2, label = City)) +
+  geom_point(color = "darkred", size = 3) +
+  geom_text(vjust = -1, size = 3) +
+  labs(
+    title = paste("Skalowanie Wielowymiarowe Sammon'a (Stress:", round(sammon_stress1, 3), ")"),
+    x = "Dim 1",
+    y = "Dim 2"
+  ) +
+  theme_minimal()
+```
+
+Wartość współczynnika Stress wynosząca 0,037 w przypadku skalowania Sammon'a w dwóch wymiarach wskazuje na dobre dopasowanie modelu do danych. Oznacza to, że odwzorowanie relacji między obiektami w przestrzeni dwuwymiarowej jest bardzo bliskie rzeczywistej strukturze odległościowej w wyższych wymiarach, a błąd w odwzorowaniu wynosi jedynie 3,7%. Taki niski stres sugeruje, że kluczowe informacje zawarte w danych zostały skutecznie zachowane, a redukcja wymiarów nie prowadzi do istotnych utrat danych. Dla pełniejszego obrazu warto również przeprowadzić analizę w trzech wymiarach, aby ocenić, czy dodanie kolejnego wymiaru wpłynie na dalsze zmniejszenie stresu i poprawę dopasowania modelu do danych.
+
+```{r}
+sammons_result2 <- MASS::sammon(dist_matrix, k = 3)
+```
+
+```{r echo=FALSE}
+sammon_stress2 <- sammons_result2$stress
+
+sammon_points2 <- sammons_result2$points
+
+plot_ly(
+  x = sammon_points2[, 1],  
+  y = sammon_points2[, 2],  
+  z = sammon_points2[, 3],  
+  type = "scatter3d",      
+  mode = "markers",        
+  marker = list(color = "darkred", size = 5)  
+) %>%
+  layout(
+    title = paste("Nieliniowe mapowanie Sammona<br>(Stress:", round(sammon_stress2, 5), ")"),
+    scene = list(
+      xaxis = list(title = "Dim 1"),
+      yaxis = list(title = "Dim 2"),
+      zaxis = list(title = "Dim 3")
+    )
+  )
+```
+
+
+Wartość stresu wynosząca 0,0139 w przypadku skalowania Sammon'a w trzech wymiarach wskazuje na jeszcze lepsze dopasowanie modelu do danych niż w przypadku dwóch wymiarów, gdzie stres wynosił 0,037. W tym przypadku błąd odwzorowania relacji między obiektami w przestrzeni 3D wynosi jedynie 1,39%, co sugeruje, że dodanie trzeciego wymiaru jeszcze bardziej poprawiło jakość odwzorowania. Zmniejszenie stresu z 3,7% do 1,39% świadczy o tym, że struktura odległościowa w danych jest lepiej uchwycona w przestrzeni trójwymiarowej, a dalsza redukcja wymiarów wciąż zachowuje wysoką wierność oryginalnym zależnościom między obiektami.
+
+## Porównanie wyników skalowania wielowymiarowego
+
+### Porównanie wyników skalowania wielowymiarowego dla dwóch wymiarów
+
+```{r echo=FALSE}
+results2 <- data.frame(
+  Metoda = c("Klasyczne skalowanie metryczne", 
+             "Skalowanie nieliniowe Sammona"),
+  Stres = c(cmdscale_stress1, sammon_stress1),
+  Dopasowanie = c("bardzo słabe", "dobre")
+)
+
+results2 %>%
+  kable(
+    col.names = c("Metoda", "Stress", "Dopasowanie"),
+    align = "c"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),   
+    full_width = TRUE  
+  ) 
+```
+W przypadku klasycznego skalowania metrycznego (cmdscale) dla danych ilościowych uzyskany stres wynosi 0.2584, co wskazuje na bardzo słabe dopasowanie odwzorowania do rzeczywistych odległości między obiektami. Wysoki poziom stresu w klasycznym skalowaniu metrycznym sugeruje, że metoda ta nie była w stanie w pełni oddać zależności między obiektami w przestrzeni dwóch wymiarów. Może to być efektem niedostosowania metody do struktury danych. W przeciwieństwie do tego, metoda Sammona, zastosowana do tych samych danych, osiągnęła wwartość współczynnika Stress równą 0.0373, co wskazuje na dobre dopasowanie. Stres na poziomie 3,73% oznacza, że odwzorowanie w przestrzeni dwóch wymiarów dobrze oddaje oryginalne odległości między obiektami, co czyni tę metodę bardziej efektywną w przypadku wybranych danych.
+
+### Porównanie wyników skalowania wielowymiarowego dla trzech wymiarów
+
+```{r echo=FALSE}
+results3 <- data.frame(
+  Metoda = c("Klasyczne skalowanie metryczne", 
+             "Skalowanie nieliniowe Sammona"),
+  Stres = c(cmdscale_stress2, sammon_stress2),
+  Dopasowanie = c("słabe", "bardzo dobre")
+)
+
+results3 %>%
+  kable(
+    col.names = c("Metoda", "Stress", "Dopasowanie"),
+    align = "c"  
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),   
+    full_width = TRUE  
+  )
+```
+Dla trójwymiarowego odwzorowania, klasyczne skalowanie metryczne (cmdscale) wykazało stres wynoszący 0.1562, co oznacza słabe dopasowanie odwzorowania do rzeczywistych odległości. Chociaż dodanie trzeciego wymiaru w teorii powinno poprawić dopasowanie, w przypadku tej metody wartość współczynnika Stress nadal wskazuje na znaczną utratę informacji. W kontekście danych ilościowych, gdzie zależności między zmiennymi mogą być nieliniowe, klasyczne skalowanie metryczne może mieć trudności z wiernym odwzorowaniem oryginalnych relacji między obiektami. Z kolei metoda Sammona uzyskała wartość współczynnika Stress równą 0.0131, co stanowi bardzo dobre dopasowanie. Stres na poziomie 1,31% sugeruje, że metoda nieliniowa Sammona skutecznie zachowuje zależności między obiektami w przestrzeni trójwymiarowej, oferując znacznie lepsze odwzorowanie niż klasyczne skalowanie metryczne.
+
+### Wnioski
+
+Analiza wyników wskazuje, że metoda Sammona, zarówno w przestrzeni dwóch, jak i trzech wymiarów, daje znacznie lepsze dopasowanie niż klasyczne skalowanie metryczne. W szczególności, dla trzech wymiarów, metoda Sammona wykazuje bardzo niski poziom stresu, co świadczy o wysokiej jakości odwzorowania w przestrzeni niskowymiarowej. Z kolei klasyczne skalowanie metryczne, mimo dodania trzeciego wymiaru, nadal osiąga stosunkowo wysokie wartości współczynnika Stress, co sugeruje, że nie jest optymalną metodą dla wybranych danych. W kontekście danych, w których zależności mogą być nieliniowe, skalowanie nieliniowe Sammona wydaje się być bardziej odpowiednią metodą do zachowania oryginalnych struktur danych.
+
+# Podsumowanie 
+
+Metody redukcji wymiarów, takie jak analiza głównych składowych (PCA) oraz skalowanie wielowymiarowe (MDS), są szeroko stosowane do wizualizacji oraz analizy danych o wysokiej liczbie wymiarów. Obie techniki mają na celu reprezentowanie danych w przestrzeni o mniejszej liczbie wymiarów, jednak różnią się one zarówno w zakresie podejścia, jak i w sposobie odwzorowywania zależności między obiektami. W kontekście danych ilościowych, gdzie zależności między zmiennymi mogą być zarówno liniowe, jak i nieliniowe, wybór odpowiedniej metody zależy od struktury tych danych.
+
+**Analiza głównych składowych (PCA)**
+
+**Zalety:**
+
+- Redukcja wymiarów przy zachowaniu wariancji: PCA efektywnie redukuje liczbę wymiarów, jednocześnie maksymalizując zachowanie wariancji w danych, co pozwala na uproszczenie struktury danych przy minimalnej utracie informacji
+- Łatwość interpretacji: Składowe główne są uporządkowane według wyjaśnianej wariancji, co umożliwia łatwą identyfikację najistotniejszych cech zmienności w danych
+- Skuteczność w danych liniowych: PCA jest optymalną metodą w przypadku, gdy dane charakteryzują się dominującymi zależnościami liniowymi, ponieważ skutecznie odwzorowuje zmienność w przestrzeni niskowymiarowej
+- Identyfikacja zmiennych o największym znaczeniu: Analiza głównych składowych pozwala na zrozumienie, które zmienne mają największy wpływ na zmienność całego zbioru danych, wspierając procesy selekcji cech
+
+**Wady:**
+
+- Zależność od korelacji zmiennych: PCA zakłada istnienie wysokiej korelacji pomiędzy zmiennymi, co może ograniczać jego zastosowanie w przypadku zbiorów danych, gdzie korelacja ta jest niska
+- Założenie liniowości: Metoda opiera się na założeniu, że zależności między zmiennymi są liniowe, co ogranicza jej zastosowanie do bardziej złożonych struktur danych o charakterze nieliniowym
+- Wymaga odpowiedniego przygotowania danych: Wyniki PCA są silnie uzależnione od skali danych. Wymaga to wcześniejszej standaryzacji zmiennych, szczególnie gdy te różnią się jednostkami miary
+- Utrata informacji: Redukcja wymiarów wiąże się z potencjalną utratą części informacji, zwłaszcza gdy liczba składowych głównych jest znacznie mniejsza od liczby pierwotnych zmiennych
+
+PCA, w wyniku analizy danych w dwóch wymiarach, wyjaśniła ponad 70% wariancji, co sugeruje, że metoda ta efektywnie odwzorowuje główną część zmienności danych. W przypadku danych, które wykazują silną liniową zależność, PCA może być idealnym narzędziem.
+
+**Skalowanie Wielowymiarowe (MDS)**
+
+**Zalety:**
+
+- Zastosowanie dla danych metrycznych i niemetrycznych: MDS jest uniwersalny i może być stosowany zarówno w przypadku danych metrycznych, jak i niemetrycznych, co zwiększa jego wszechstronność
+- Różnorodność podejść: Skalowanie wielowymiarowe oferuje różne metody, takie jak klasyczne skalowanie (cmdscale), skalowanie Kruskala czy metoda Sammona, co pozwala na dostosowanie techniki do specyfiki danych
+- Reprezentacja danych w przestrzeni o niskiej wymiarowości: MDS umożliwia odwzorowanie złożonych danych w przestrzeni dwuwymiarowej lub trójwymiarowej, z zachowaniem struktury odległości między obiektami
+- Elastyczność w modelowaniu danych: MDS nie wymaga wysokiej korelacji między zmiennymi, co sprawia, że może być stosowany do szerokiego zakresu danych o różnorodnych właściwościach.
+
+
+**Wady:**
+
+- Trudności interpretacyjne: Wyniki MDS mogą być trudne do jednoznacznej interpretacji, zwłaszcza w przypadku bardziej złożonych danych
+- Zależność od wybranej metody i miary: Uzyskane wyniki są wrażliwe na zastosowaną metodę skalowania oraz wybraną miarę odległości, co może prowadzić do różnic w odwzorowaniu danych i trudności w ich porównywaniu
+
+Skalowanie wielowymiarowe, szczególnie w przypadku klasycznego MDS, wykazało wysoką wartość współczynnika Stress, co sugeruje, że metoda ta może nie być idealnym rozwiązaniem, gdy dane nie są silnie liniowe lub mają złożoną strukturę. Natomiast metoda Sammona, jako technika nieliniowa, osiągnęła bardzo niską wartość współczynnika, co wskazuje na jej skuteczność w odwzorowywaniu odległości między obiektami.
+
+
+Pomimo że PCA jest efektywną metodą w kontekście danych o silnych zależnościach liniowych, jej zdolność do uchwycenia złożonych, nieliniowych zależności jest ograniczona. Z drugiej strony, MDS, w tym metoda Sammona, wykazuje większą elastyczność, ponieważ może lepiej odwzorować nieliniowe relacje między obiektami, co prowadzi do bardziej precyzyjnego odwzorowania odległości w przestrzeni niskowymiarowej.
+
+Analizując wyniki uzyskane dla dwóch wymiarów, można zauważyć, że PCA, wyjaśniając ponad 70% wariancji, oferuje efektywne odwzorowanie danych, zachowując znaczną część informacji. Dla tego samego przypadku, klasyczne MDS wykazuje wysoką wartość współczynnika Stress, co wskazuje na słabe dopasowanie odwzorowania. Z kolei metoda Sammona, jako technika nieliniowa, uzyskała bardzo niski stres, co oznacza, że skutecznie odwzorowuje oryginalne odległości między obiektami.
+
+Wybór odpowiedniej metody zależy więc od struktury danych oraz celu analizy. Jeśli dane wykazują głównie zależności liniowe, PCA będzie bardziej efektywną metodą. Natomiast w przypadku danych, w których występują zależnośći nieliniowe, MDS, a zwłaszcza metoda Sammona, będzie bardziej adekwatna.
