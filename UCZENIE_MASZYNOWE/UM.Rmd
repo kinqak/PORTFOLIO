@@ -1,0 +1,1302 @@
+---
+title: "PROJEKT_ML"
+author: "Julia Matyja, Kinga Kołodziej"
+date: "2025-12-19"
+output: html_document
+---
+
+# Wymagane biblioteki
+
+```{r message=FALSE, warning=FALSE}
+library(readr)
+library(DescTools)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(ranger)
+library(kernlab)
+library(rpart)
+library(rpart.plot)
+library(moments)
+library(DALEX)
+library(ingredients)
+library(vip)
+library(gridExtra)
+library(moments)
+```
+
+# Dane
+
+Wykorzystany zbiór danych zawiera informacje dotyczące procesu rekrutacyjnego oraz czynników wpływających na decyzję o zatrudnieniu kandydata. Każda obserwacja w zbiorze reprezentuje jednego kandydata i opisuje jego cechy demograficzne, wykształcenie, doświadczenie zawodowe oraz wyniki ocen stosowanych w procesie rekrutacji. Zmienna HiringDecision reprezentuje końcową decyzję rekrutacyjną. Przyjmuje wartość 0, jeśli kandydat nie został zatrudniony, oraz wartość 1, jeśli kandydat został zatrudniony. Jest to zmienna binarna pełniąca rolę zmiennej objaśnianej w analizie i modelach predykcyjnych. Zestaw danych zawiera 6 zmiennych ilościowych: Age, ExperienceYears, PreviousCompanies, DistanceFromCompany, IntervievScore, SkillScore, PersonalityScore oraz 3 zmienne kategoryczne: Gender, EducationLevel, RecruitmentStrategy.
+
+```{r}
+data <- read.csv("~/Desktop/Studia magisterskie/ROK 1 MGR/Semestr 1/Uczenie maszynowe/recruitment_data.csv")
+```
+
+```{r}
+head(data)
+```
+
+**Zmienne ilościowe:**
+
+- Age
+Zmienna opisuje wiek kandydata wyrażony w latach (Integer). Przyjmuje wartości z zakresu od 20 do 50 lat. 
+- ExperienceYears
+Zmienna określa liczbę lat doświadczenia zawodowego kandydata. Jej wartości mieszczą się w przedziale od 0 do 15 lat. Jest to zmienna ilościowa dyskretna (Integer).
+
+- PreviousCompanies
+Zmienna informuje o liczbie firm, w których kandydat był wcześniej zatrudniony. Przyjmuje wartości od 1 do 5. Jest to zmienna ilościowa dyskretna (Integer).
+
+- DistanceFromCompany
+Zmienna określa odległość miejsca zamieszkania kandydata od siedziby firmy, wyrażoną w kilometrach. Zakres wartości wynosi od 1 do 50 km. Jest to zmienna ilościowa ciągła (Float).
+
+- InterviewScore
+Zmienna przedstawia wynik uzyskany przez kandydata podczas rozmowy kwalifikacyjnej. Przyjmuje wartości od 0 do 100 punktów. Jest to zmienna ilościowa dyskretna (Integer).
+
+- SkillScore
+Zmienna opisuje ocenę umiejętności technicznych kandydata, również w skali od 0 do 100 punktów. Jest to zmienna ilościowa dyskretna (Integer).
+
+- PersonalityScore
+Zmienna określa ocenę cech osobowości kandydata uzyskaną w trakcie procesu rekrutacyjnego. Przyjmuje wartości od 0 do 100 punktów. Jest to zmienna ilościowa dyskretna (Integer).
+
+**Zmienne kategoryczne:**
+
+- Gender
+Zmienna opisuje płeć kandydata. Przyjmuje dwie możliwe wartości: 0 oznacza mężczyznę, natomiast 1 oznacza kobietę. Jest to zmienna kategoryczna binarna.
+
+- EducationLevel
+Zmienna opisuje najwyższy poziom wykształcenia osiągnięty przez kandydata. W pierwotnej wersji przyjmowała wartości od 1 do 4, odpowiadające kolejno dwóm typom studiów pierwszego stopnia, studiom magisterskim oraz stopniowi doktora. Jest to zmienna kategoryczna o charakterze porządkowym. Ze względu na brak jednoznacznych informacji dotyczących różnic pomiędzy kategoriami 1 (Bachelor’s Type 1) oraz 2 (Bachelor’s Type 2), podjęto decyzję o ich połączeniu w jedną kategorię reprezentującą studia pierwszego stopnia. Celem tego zabiegu było uproszczenie struktury zmiennej oraz zwiększenie interpretowalności wyników analizy, przy jednoczesnym zachowaniu logicznej hierarchii poziomów wykształcenia. Ostatecznie zmienna EducationLevel została sprowadzona do trzech poziomów: 1 - studia pierwszego stopnia, 2 - studia magisterskie oraz 3 - stopień doktora.
+
+```{r}
+data$EducationLevel <- ifelse(
+  data$EducationLevel %in% c(1, 2), 1,
+  ifelse(data$EducationLevel == 3, 2, 3)
+)
+```
+
+- RecruitmentStrategy
+Zmienna opisuje strategię rekrutacyjną zastosowaną przez firmę wobec danego kandydata. Przyjmuje wartości od 1 do 3, odpowiadające strategii agresywnej, umiarkowanej oraz zachowawczej. Jest to zmienna kategoryczna.
+
+# EDA
+
+```{r}
+colSums(is.na(data))
+```
+
+Brak braków danych.
+
+```{r}
+table(data$HiringDecision)
+prop.table(table(data$HiringDecision))
+```
+Zbiór niezbalansowany - oversampling lub undersampling.
+
+```{r}
+str(data)
+```
+
+```{r}
+data$Age <- as.numeric(data$Age)
+data$Gender <- as.factor(data$Gender)
+data$EducationLevel <- as.factor(data$EducationLevel)
+data$ExperienceYears <- as.numeric(data$ExperienceYears)
+data$PreviousCompanies <- as.numeric(data$PreviousCompanies)
+data$DistanceFromCompany <- as.numeric(data$DistanceFromCompany)
+data$InterviewScore <- as.numeric(data$InterviewScore)
+data$SkillScore <- as.numeric(data$SkillScore)
+data$PersonalityScore <- as.numeric(data$PersonalityScore)
+data$RecruitmentStrategy <- as.factor(data$RecruitmentStrategy)
+data$HiringDecision <- as.factor(data$HiringDecision)
+```
+
+```{r}
+str(data)
+```
+
+```{r}
+boxplot(data$Age)
+```
+
+```{r}
+boxplot(data$ExperienceYears)
+```
+
+```{r}
+boxplot(data$PreviousCompanies)
+```
+
+```{r}
+boxplot(data$DistanceFromCompany)
+```
+
+```{r}
+boxplot(data$InterviewScore)
+```
+
+```{r}
+boxplot(data$SkillScore)
+```
+
+```{r}
+boxplot(data$PersonalityScore)
+```
+
+```{r}
+layout(matrix(1:9, nrow = 3, byrow = TRUE))
+
+par(
+  mar = c(2.5, 2.5, 1.5, 0.5),
+  mgp = c(1.5, 0.4, 0),
+  cex.main = 0.9
+)
+
+vars <- list(
+  Age = data$Age,
+  ExperienceYears = data$ExperienceYears,
+  PreviousCompanies = data$PreviousCompanies,
+  DistanceFromCompany = data$DistanceFromCompany,
+  InterviewScore = data$InterviewScore,
+  SkillScore = data$SkillScore,
+  PersonalityScore = data$PersonalityScore
+)
+
+for (v in names(vars)) {
+  boxplot(vars[[v]],
+          main = v,
+          col = adjustcolor("darkred", 0.5),
+          border = "black",
+          medcol = "black",
+          lwd = 0.5,
+          boxwex = 0.5)
+}
+
+plot.new()
+plot.new()
+
+layout(1)
+```
+
+Brak wartości odstających.
+
+Rozkłady zmiennych ilościowych 
+
+```{r}
+layout(matrix(1:9, nrow = 3, byrow = TRUE))
+
+par(
+  mar = c(2.5, 2.5, 1.5, 0.5),
+  mgp = c(1.5, 0.4, 0),
+  cex.main = 0.9
+)
+
+vars <- list(
+  Age = data$Age,
+  ExperienceYears = data$ExperienceYears,
+  PreviousCompanies = data$PreviousCompanies,
+  DistanceFromCompany = data$DistanceFromCompany,
+  InterviewScore = data$InterviewScore,
+  SkillScore = data$SkillScore,
+  PersonalityScore = data$PersonalityScore
+)
+
+for (v in names(vars)) {
+  d <- density(vars[[v]], na.rm = TRUE)
+  
+  plot(
+    d,
+    main = v,
+    xlab = "",
+    ylab = "",
+    col = "black",
+    lwd = 1.5
+  )
+  
+  polygon(
+    d,
+    col = adjustcolor("darkred", 0.4),
+    border = "black"
+  )
+}
+
+plot.new()
+plot.new()
+
+layout(1)
+```
+
+## Statystki opisowe
+
+```{r}
+num_vars <- sapply(data, is.numeric)
+
+stats_numeric <- data.frame(
+  mean   = sapply(data[, num_vars], mean, na.rm = TRUE),
+  median = sapply(data[, num_vars], median, na.rm = TRUE),
+  min    = sapply(data[, num_vars], min, na.rm = TRUE),
+  max    = sapply(data[, num_vars], max, na.rm = TRUE),
+  q1     = sapply(data[, num_vars], quantile, 0.25, na.rm = TRUE),
+  q3     = sapply(data[, num_vars], quantile, 0.75, na.rm = TRUE),
+  sd     = sapply(data[, num_vars], sd, na.rm = TRUE),
+  skew   = sapply(data[, num_vars], skewness, na.rm = TRUE),
+  kurt   = sapply(data[, num_vars], kurtosis, na.rm = TRUE) - 3,
+  cv     = sapply(data[, num_vars], function(x) sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE))
+)
+
+stats_numeric
+```
+
+```{r}
+cat_vars <- sapply(data, is.factor)
+
+lapply(data[, cat_vars], function(x) {
+  prop.table(table(x))
+})
+```
+
+## Wpływ zmiennych kategorycznych na Y
+
+```{r}
+tab_gender <- table(data$Gender, data$HiringDecision)
+tab_gender
+
+chisq.test(tab_gender)
+DescTools::CramerV(tab_gender)
+```
+Gender - brak dowodu na zależność
+
+```{r}
+tab_edu <- table(data$EducationLevel, data$HiringDecision)
+tab_edu
+
+chisq.test(tab_edu)
+DescTools::CramerV(tab_edu)
+```
+EducationLevel - zależność istotna statystycznie, słaby wpływ
+
+```{r}
+tab_rec <- table(data$RecruitmentStrategy, data$HiringDecision)
+tab_rec
+
+chisq.test(tab_rec)
+DescTools::CramerV(tab_rec)
+```
+RecruitmentStrategy - zależność istotna statystycznie, silny wpływ
+
+## Wpływ zmiennych ilościowych na Y
+
+```{r}
+ggplot(data, aes(x = Age, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = Age)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+
+Age - bardzo słaby wpływ
+
+```{r}
+ggplot(data, aes(x = ExperienceYears, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = ExperienceYears)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+ExperienceYears - jest zależność
+
+```{r}
+ggplot(data, aes(x = InterviewScore, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = InterviewScore)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+InterviewScore - jest zależność
+
+```{r}
+ggplot(data, aes(x = SkillScore, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = SkillScore)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+SkillScore - jest zależność
+
+```{r}
+ggplot(data, aes(x = PersonalityScore, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = PersonalityScore)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+PersonalityScore - jest zależność
+
+```{r}
+ggplot(data, aes(x = PreviousCompanies, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = PreviousCompanies)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+PreviousCompanies - jest zależność 
+
+```{r}
+ggplot(data, aes(x = DistanceFromCompany, fill = HiringDecision)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("darkred", "grey")) +
+  theme_minimal() 
+
+ggplot(data, aes(x = HiringDecision, y = DistanceFromCompany)) +
+  geom_boxplot() +
+  theme_minimal() 
+```
+DistanceFromCompany - brak zależności
+
+# Modelowanie 
+
+## Podział danych na zbiór treningowy i testowy
+
+Dane podzielono na zbiór treningowy (80%) i testowy (20%) z zachowaniem proporcji klas.
+
+
+```{r}
+set.seed(123)
+train_index <- createDataPartition(data$HiringDecision, p = 0.8, list = FALSE)
+train_data <- data[train_index, ]
+test_data  <- data[-train_index, ]
+```
+
+```{r}
+train_data$HiringDecision <- factor(
+  train_data$HiringDecision,
+  levels = c(0, 1),
+  labels = c("No", "Yes")
+)
+
+test_data$HiringDecision <- factor(
+  test_data$HiringDecision,
+  levels = c(0, 1),
+  labels = c("No", "Yes")
+)
+```
+
+```{r}
+prop.table(table(train_data$HiringDecision))
+prop.table(table(test_data$HiringDecision))
+```
+
+# One-hot encoding dla modeli glm, knn, kknn, svm
+
+Po podziale danych na zbiór treningowy i testowy przeprowadzono kodowanie zmiennych kategorycznych metodą one-hot encoding. Proces kodowania został wykonany wyłącznie na zbiorze treningowym, a następnie zastosowany do zbioru testowego, co pozwoliło uniknąć przecieku informacji pomiędzy zbiorami. Zakodowane dane wykorzystano w modelach wymagających numerycznej reprezentacji cech, takich jak regresja logistyczna, k-najbliższych sąsiadów oraz maszyny wektorów nośnych.
+
+```{r}
+encoder <- onehot::onehot(
+  train_data[, setdiff(names(train_data), "HiringDecision")]
+)
+
+train_data_encoded <- as.data.frame(predict(encoder, train_data))
+train_data_encoded$HiringDecision <- train_data$HiringDecision
+
+test_data_encoded <- as.data.frame(predict(encoder, test_data))
+test_data_encoded$HiringDecision <- test_data$HiringDecision
+```
+
+```{r}
+cols_to_remove <- c(
+  "Gender=0",
+  "EducationLevel=1",
+  "RecruitmentStrategy=1"
+)
+```
+
+```{r}
+train_data_encoded <- train_data_encoded[, 
+  !names(train_data_encoded) %in% cols_to_remove
+]
+
+test_data_encoded <- test_data_encoded[, 
+  !names(test_data_encoded) %in% cols_to_remove
+]
+```
+
+
+## Walidacja krzyżowa
+
+W celu rzetelnej oceny skuteczności modeli predykcyjnych zastosowano powtarzaną 10-krotną walidację krzyżową, powtórzoną trzykrotnie. Wybór tej metody podyktowany był potrzebą uzyskania stabilnej estymacji jakości modeli przy jednoczesnym ograniczeniu wpływu losowego podziału danych na uzyskiwane wyniki. 
+
+Ze względu na niezbalansowany rozkład zmiennej objaśnianej HiringDecision, w procesie uczenia modeli uwzględniono nadpróbkowanie klasy mniejszościowej (oversampling). Operacja ta była wykonywana wyłącznie na zbiorach treningowych w obrębie poszczególnych foldów walidacji krzyżowej.Takie podejście zapobiega przeciekowi informacji pomiędzy danymi treningowymi i walidacyjnymi.
+
+W procesie rekrutacyjnym zarówno fałszywe negatywy, jak i fałszywe pozytywy generują koszty. Zatrudnienie niewłaściwego kandydata może prowadzić do strat finansowych związanych z onboardingiem, czasem pracy zespołu oraz rotacją pracowników. Jednocześnie odrzucenie potencjalnie dobrego kandydata wiąże się z utratą kapitału ludzkiego, który mógłby przynieść organizacji długoterminową wartość. W ninejszym projekcie przyjęto próg decyzyjny 0.5 oraz dokładność jako główną metrykę, zakładając porównywalny koszt obu typów błędów rekrutacyjnych. Takie podejście zapewnia zrównoważoną liczbę fałszywych pozytywów i negatywów.
+
+
+```{r}
+mySummary <- function(data, lev = NULL, model = NULL) {
+  c(
+    Accuracy = caret::postResample(data$pred, data$obs)[["Accuracy"]],
+    Sens     = caret::sensitivity(data$pred, data$obs, positive = "Yes"),
+    Spec     = caret::specificity(data$pred, data$obs, negative = "No")
+  )
+}
+
+set.seed(123)
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3,
+  sampling = "up",
+  savePredictions = "final",
+  summaryFunction = mySummary,
+  classProbs = TRUE
+)
+```
+
+## Model regresji logistycznej 
+
+
+```{r}
+set.seed(123)
+
+model_glm <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "glm",
+  family = binomial,
+  trControl = ctrl,
+  metric = "Accuracy"
+)
+```
+
+```{r}
+model_glm
+```
+
+```{r}
+summary(model_glm)
+```
+
+```{r}
+model_glm_test <- predict(model_glm, newdata = test_data_encoded)
+```
+
+```{r}
+cm_glm <- confusionMatrix(
+  model_glm_test,
+  test_data_encoded$HiringDecision,
+  positive = "Yes"
+)
+
+cm_glm
+```
+
+
+## Model knn
+
+
+```{r}
+getModelInfo("knn")$knn$parameters
+```
+
+```{r}
+set.seed(123)
+
+k_grid <- data.frame(k = seq(1, 35, by = 2))
+
+model_knn <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "knn",
+  trControl = ctrl,
+  metric = "Accuracy",
+  preProcess = c("center", "scale"),
+  tuneGrid = k_grid
+)
+```
+
+```{r}
+model_knn
+```
+
+```{r}
+knn_pred_test <- predict(model_knn, newdata = test_data_encoded)
+
+cm_knn <- confusionMatrix(
+  knn_pred_test,
+  test_data_encoded$HiringDecision,
+  positive = "Yes"
+)
+cm_knn
+```
+
+
+## Model kknn
+
+```{r}
+getModelInfo("kknn")$kknn$parameters
+```
+
+```{r}
+set.seed(123)
+
+kknn_grid <- expand.grid(
+  kmax     = seq(1, 35, by = 2),     
+  distance = c(1, 2),               
+  kernel   = c("rectangular",
+               "triangular",
+               "epanechnikov",
+               "gaussian")
+)
+
+model_kknn <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "kknn",
+  trControl = ctrl,
+  metric = "Accuracy",
+  preProcess = c("center", "scale"),
+  tuneGrid = kknn_grid
+)
+```
+
+```{r}
+model_kknn
+```
+
+```{r}
+kknn_pred_test <- predict(model_kknn, newdata = test_data_encoded)
+
+cm_kknn <- confusionMatrix(
+  kknn_pred_test,
+  test_data_encoded$HiringDecision,
+  positive = "Yes"
+)
+cm_kknn
+```
+
+## Drzewo decyzyjne
+
+```{r}
+getModelInfo("rpart")$rpart$parameters
+```
+
+```{r}
+set.seed(123)
+
+cp_grid <- expand.grid(cp = seq(0.001, 0.05, by = 0.001))
+
+model_tree <- train(
+  HiringDecision ~ .,
+  data = train_data,
+  method = "rpart",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = cp_grid
+)
+```
+
+```{r}
+model_tree
+```
+
+```{r}
+tree_pred_test <- predict(model_tree, newdata = test_data)
+
+cm_tree <- confusionMatrix(
+  tree_pred_test,
+  test_data$HiringDecision,
+  positive = "Yes"
+)
+cm_tree
+```
+
+```{r}
+rpart.plot(model_tree$finalModel)
+```
+
+```{r}
+plot(model_tree)
+```
+
+## Lasy losowe
+
+```{r}
+getModelInfo("ranger")$ranger$parameters
+```
+
+```{r}
+p <- ncol(train_data) - 1
+
+rf_grid <- expand.grid(
+  mtry = 1:p,
+  splitrule = c("gini", "extratrees"),
+  min.node.size = c(1, 5, 10, 20)
+)
+```
+
+Dla 100 drzew.
+
+```{r}
+set.seed(123)
+
+model_rf_100 <- train(
+  HiringDecision ~ .,
+  data = train_data,
+  method = "ranger",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = rf_grid,
+  num.trees = 100
+)
+```
+
+```{r}
+model_rf_100
+```
+
+```{r}
+rf_100_pred_test <- predict(model_rf_100, newdata = test_data)
+
+cm_rf_100 <- confusionMatrix(
+  rf_100_pred_test,
+  test_data$HiringDecision,
+  positive = "Yes"
+)
+cm_rf_100
+```
+
+Dla 200 drzew.
+
+```{r}
+set.seed(123)
+
+model_rf_200 <- train(
+  HiringDecision ~ .,
+  data = train_data,
+  method = "ranger",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = rf_grid,
+  num.trees = 200
+)
+```
+
+```{r}
+model_rf_200
+```
+
+```{r}
+rf_200_pred_test <- predict(model_rf_200, newdata = test_data)
+
+cm_rf_200 <- confusionMatrix(
+  rf_200_pred_test,
+  test_data$HiringDecision,
+  positive = "Yes"
+)
+cm_rf_200
+```
+
+Dla 500 drzew.
+
+```{r}
+set.seed(123)
+
+model_rf_500 <- train(
+  HiringDecision ~ .,
+  data = train_data,
+  method = "ranger",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = rf_grid,
+  num.trees = 500
+)
+```
+
+```{r}
+model_rf_500
+```
+
+```{r}
+rf_500_pred_test <- predict(model_rf_500, newdata = test_data)
+
+cm_rf_500 <- confusionMatrix(
+  rf_500_pred_test,
+  test_data$HiringDecision,
+  positive = "Yes"
+)
+cm_rf_500
+```
+
+## XGBoost
+
+
+```{r}
+getModelInfo("xgbTree")$xgbTree$parameters
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+
+xgb_grid <- expand.grid(
+  nrounds = c(100, 200, 300),
+  max_depth = c(3, 5, 7),
+  eta = c(0.03, 0.05, 0.1),
+  gamma = c(0, 1),
+  colsample_bytree = c(0.8, 1.0),
+  min_child_weight = c(1, 5),
+  subsample = c(0.8, 1.0)
+)
+
+model_xgb <- train(
+  HiringDecision ~ .,
+  data = train_data, 
+  method = "xgbTree",
+  trControl = ctrl,
+  tuneGrid = xgb_grid,
+  metric = "Accuracy"
+)
+```
+
+```{r}
+# options(max.print = 20000)
+model_xgb
+model_xgb$bestTune
+
+best_cv_metrics_xgb <- model_xgb$results[
+  apply(model_xgb$results[, names(model_xgb$bestTune)], 1,
+        function(x) all(x == model_xgb$bestTune)),
+]
+
+best_cv_metrics_xgb
+```
+
+```{r}
+xgb_pred_test <- predict(model_xgb, newdata = test_data)
+
+confusionMatrix(
+  xgb_pred_test,
+  test_data$HiringDecision,
+  positive = "Yes"
+)
+```
+
+## SVM
+
+Dla jądra liniowego.
+
+```{r}
+getModelInfo("svmLinear")$svmLinear$parameters
+```
+
+```{r}
+set.seed(123)
+
+grid_lin <- expand.grid(C = c(0.01, 0.05, 0.1, 0.5, 1, 5, 10))
+
+model_svm_lin <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "svmLinear",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = grid_lin,
+  preProcess = c("center", "scale")
+)
+```
+
+```{r}
+model_svm_lin
+```
+
+```{r}
+pred_lin <- predict(model_svm_lin, newdata = test_data_encoded)
+
+cm_lin <- confusionMatrix(
+  pred_lin, 
+  test_data_encoded$HiringDecision, 
+  positive = "Yes")
+cm_lin
+```
+
+
+Dla jądra radialnego.
+
+```{r}
+getModelInfo("svmRadial")$svmRadial$parameters
+```
+
+```{r}
+set.seed(123)
+
+grid_rbf <- expand.grid(
+  sigma = c(0.001, 0.01, 0.1),
+  C     = c(0.01, 0.05, 0.1, 0.5, 1, 5, 10)
+)
+
+model_svm_rbf <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "svmRadial",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = grid_rbf,
+  preProcess = c("center", "scale")
+)
+```
+
+```{r}
+model_svm_rbf
+```
+
+```{r}
+pred_rbf <- predict(model_svm_rbf, newdata = test_data_encoded)
+
+cm_rbf <- confusionMatrix(
+  pred_rbf, 
+  test_data_encoded$HiringDecision, 
+  positive = "Yes")
+cm_rbf
+```
+
+
+Dla jądra wielomianowego. 
+
+```{r}
+getModelInfo("svmPoly")$svmPoly$parameters
+```
+
+```{r}
+set.seed(123)
+
+grid_poly <- expand.grid(
+  degree = c(2, 3, 4),
+  scale  = c(0.01, 0.1),
+  C      = c(0.01, 0.05, 0.1, 0.5, 1, 5, 10)
+)
+
+model_svm_poly <- train(
+  HiringDecision ~ .,
+  data = train_data_encoded,
+  method = "svmPoly",
+  trControl = ctrl,
+  metric = "Accuracy",
+  tuneGrid = grid_poly,
+  preProcess = c("center", "scale")
+)
+```
+
+```{r}
+model_svm_poly
+```
+
+```{r}
+pred_poly <- predict(model_svm_poly, newdata = test_data_encoded)
+
+cm_poly <- confusionMatrix(
+  pred_poly, 
+  test_data_encoded$HiringDecision, 
+  positive = "Yes")
+cm_poly
+```
+
+# Analiza interpretowalności
+
+```{r}
+vip(model_xgb, 20)
+```
+
+Profile ceteris-paribus
+
+Zmienne ilościowe
+
+```{r}
+explain_xgb <- explain(
+  model = model_xgb,
+  data  = train_data[, -ncol(train_data)],
+  y     = train_data$HiringDecision,
+  label = "XGBoost",
+  type = "classification"
+)
+```
+
+```{r}
+obs <- train_data[123,]
+
+obs
+```
+
+
+```{r}
+pcp <- predict_profile(
+  explainer = explain_xgb,
+  new_observation = obs
+)
+
+plot(pcp, variables = c("Age"))
+```
+
+```{r}
+plot(pcp, variables = c("ExperienceYears"))
+```
+
+```{r}
+plot(pcp, variables = c("PreviousCompanies"))
+```
+
+```{r}
+plot(pcp, variables = c("DistanceFromCompany"))
+```
+
+```{r}
+plot(pcp, variables = c("InterviewScore"))
+```
+
+```{r}
+plot(pcp, variables = c("SkillScore"))
+```
+
+```{r}
+plot(pcp, variables = c("PersonalityScore"))
+```
+
+Zmienne kategoryczne
+
+```{r}
+plot(pcp, variables = c("Gender"), 
+     variable_type = "categorical", categorical_type = "bars")
+```
+```{r}
+plot(pcp, variables = c("EducationLevel"), 
+     variable_type = "categorical", categorical_type = "bars")
+```
+```{r}
+plot(pcp, variables = c("RecruitmentStrategy"), 
+     variable_type = "categorical", categorical_type = "bars")
+```
+
+Wykresy częściowej zależności
+
+Zmienne ilościowe
+
+Zmienna Age
+
+```{r}
+pdpAge <- model_profile(explainer = explain_xgb, variables = "Age")
+plot(pdpAge)
+```
+
+```{r}
+plot(pdpAge, geom = "profiles") + 
+    ggtitle("PCP and PDP for Age") 
+```
+
+```{r}
+pdpAge <- model_profile(explainer = explain_xgb, variables = "Age", groups="Gender")
+plot(pdpAge, geom = "profiles") + 
+    ggtitle("PCP and PDP for age") 
+```
+
+```{r}
+pdpAge <- model_profile(explainer = explain_xgb, variables = "Age", groups="EducationLevel")
+plot(pdpAge, geom = "profiles") + 
+    ggtitle("PCP and PDP for age") 
+```
+
+```{r}
+pdpAge <- model_profile(explainer = explain_xgb, variables = "Age", groups="RecruitmentStrategy")
+plot(pdpAge, geom = "profiles") + 
+    ggtitle("PCP and PDP for age") 
+```
+
+Zmienna ExperienceYears
+
+```{r}
+pdpExperienceYears <- model_profile(explainer = explain_xgb, variables = "ExperienceYears")
+plot(pdpExperienceYears)
+```
+
+```{r}
+plot(pdpExperienceYears, geom = "profiles") + 
+    ggtitle("PCP and PDP for ExperienceYears") 
+```
+
+```{r}
+pdpExperienceYears <- model_profile(explainer = explain_xgb, variables = "ExperienceYears", groups="Gender")
+plot(pdpExperienceYears, geom = "profiles") + 
+    ggtitle("PCP and PDP for ExperienceYears") 
+```
+
+```{r}
+pdpExperienceYears <- model_profile(explainer = explain_xgb, variables = "ExperienceYears", groups="EducationLevel")
+plot(pdpExperienceYears, geom = "profiles") + 
+    ggtitle("PCP and PDP for ExperienceYears") 
+```
+
+```{r}
+pdpExperienceYears <- model_profile(explainer = explain_xgb, variables = "ExperienceYears", groups="RecruitmentStrategy")
+plot(pdpExperienceYears, geom = "profiles") + 
+    ggtitle("PCP and PDP for ExperienceYears") 
+```
+
+Zmienna PreviousCompanies
+
+```{r}
+pdpPreviousCompanies <- model_profile(explainer = explain_xgb, variables = "PreviousCompanies")
+plot(pdpPreviousCompanies)
+```
+
+```{r}
+plot(pdpPreviousCompanies, geom = "profiles") + 
+    ggtitle("PCP and PDP for PreviousCompanies") 
+```
+
+```{r}
+pdpPreviousCompanies <- model_profile(explainer = explain_xgb, variables = "PreviousCompanies", groups="Gender")
+plot(pdpPreviousCompanies, geom = "profiles") + 
+    ggtitle("PCP and PDP for PreviousCompanies") 
+```
+
+```{r}
+pdpPreviousCompanies <- model_profile(explainer = explain_xgb, variables = "PreviousCompanies", groups="EducationLevel")
+plot(pdpPreviousCompanies, geom = "profiles") + 
+    ggtitle("PCP and PDP for PreviousCompanies") 
+```
+
+```{r}
+pdpPreviousCompanies <- model_profile(explainer = explain_xgb, variables = "PreviousCompanies", groups="RecruitmentStrategy")
+plot(pdpPreviousCompanies, geom = "profiles") + 
+    ggtitle("PCP and PDP for PreviousCompanies") 
+```
+
+Zmienna DistanceFromCompany
+
+```{r}
+pdpDistanceFromCompany <- model_profile(explainer = explain_xgb, variables = "DistanceFromCompany")
+plot(pdpDistanceFromCompany)
+```
+
+```{r}
+plot(pdpDistanceFromCompany, geom = "profiles") + 
+    ggtitle("PCP and PDP for DistanceFromCompany") 
+```
+
+```{r}
+pdpDistanceFromCompany <- model_profile(explainer = explain_xgb, variables = "DistanceFromCompany", groups="Gender")
+plot(pdpDistanceFromCompany, geom = "profiles") + 
+    ggtitle("PCP and PDP for DistanceFromCompany") 
+```
+
+```{r}
+pdpDistanceFromCompany <- model_profile(explainer = explain_xgb, variables = "DistanceFromCompany", groups="EducationLevel")
+plot(pdpDistanceFromCompany, geom = "profiles") + 
+    ggtitle("PCP and PDP for DistanceFromCompany") 
+```
+
+```{r}
+pdpDistanceFromCompany <- model_profile(explainer = explain_xgb, variables = "DistanceFromCompany", groups="RecruitmentStrategy")
+plot(pdpDistanceFromCompany, geom = "profiles") + 
+    ggtitle("PCP and PDP for DistanceFromCompany") 
+```
+
+Zmienna InterviewScore 
+
+```{r}
+pdpInterviewScore <- model_profile(explainer = explain_xgb, variables = "InterviewScore")
+plot(pdpInterviewScore)
+```
+
+```{r}
+plot(pdpInterviewScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for InterviewScore") 
+```
+
+```{r}
+pdpInterviewScore <- model_profile(explainer = explain_xgb, variables = "InterviewScore", groups="Gender")
+plot(pdpInterviewScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for InterviewScore") 
+```
+
+```{r}
+pdpInterviewScore <- model_profile(explainer = explain_xgb, variables = "InterviewScore", groups="EducationLevel")
+plot(pdpInterviewScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for InterviewScore") 
+```
+
+```{r}
+pdpInterviewScore <- model_profile(explainer = explain_xgb, variables = "InterviewScore", groups="RecruitmentStrategy")
+plot(pdpInterviewScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for InterviewScore") 
+```
+
+Zmienna SkillScore
+
+```{r}
+pdpSkillScore <- model_profile(explainer = explain_xgb, variables = "SkillScore")
+plot(pdpSkillScore)
+```
+
+```{r}
+plot(pdpSkillScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for SkillScore") 
+```
+
+```{r}
+pdpSkillScore <- model_profile(explainer = explain_xgb, variables = "SkillScore", groups="Gender")
+plot(pdpSkillScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for SkillScore") 
+```
+
+```{r}
+pdpSkillScore <- model_profile(explainer = explain_xgb, variables = "SkillScore", groups="EducationLevel")
+plot(pdpSkillScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for SkillScore") 
+```
+
+```{r}
+pdpSkillScore <- model_profile(explainer = explain_xgb, variables = "SkillScore", groups="RecruitmentStrategy")
+plot(pdpSkillScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for SkillScore") 
+```
+
+Zmienna PersonalityScore
+
+```{r}
+pdpPersonalityScore <- model_profile(explainer = explain_xgb, variables = "PersonalityScore")
+plot(pdpPersonalityScore)
+```
+
+```{r}
+plot(pdpPersonalityScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for PersonalityScore") 
+```
+
+```{r}
+pdpPersonalityScore <- model_profile(explainer = explain_xgb, variables = "PersonalityScore", groups="Gender")
+plot(pdpPersonalityScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for PersonalityScore") 
+```
+
+```{r}
+pdpPersonalityScore <- model_profile(explainer = explain_xgb, variables = "PersonalityScore", groups="EducationLevel")
+plot(pdpPersonalityScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for PersonalityScore") 
+```
+
+```{r}
+pdpPersonalityScore <- model_profile(explainer = explain_xgb, variables = "PersonalityScore", groups="RecruitmentStrategy")
+plot(pdpPersonalityScore, geom = "profiles") + 
+    ggtitle("PCP and PDP for PersonalityScore") 
+```
+
+Zmienne kategoryczne
+
+Zmienna Gender
+
+```{r}
+pdpGender <- model_profile(explainer = explain_xgb, variables = "Gender", variable_type = "categorical")
+plot(pdpGender)
+```
+
+Zmienna EducationLevel
+
+```{r}
+pdpEducationLevel <- model_profile(explainer = explain_xgb, variables = "EducationLevel", variable_type = "categorical")
+plot(pdpEducationLevel)
+```
+
+Zmienna RecruitmentStrategy
+
+```{r}
+pdpRecruitmentStrategy <- model_profile(explainer = explain_xgb, variables = "RecruitmentStrategy", variable_type = "categorical")
+plot(pdpRecruitmentStrategy)
+```
+
+Wartości SHAP
+
+Wykresy BD
+
+Wykresy reprezentujące wpływ poszczególnych zmiennych na wynik końcowy.
+
+
+```{r}
+predict(model_xgb, obs, type="prob")
+```
+
+
+```{r message=FALSE, warning=FALSE}
+bd1 <- predict_parts(explainer = explain_xgb,
+                    new_observation = obs,
+                    type = "break_down_interactions", 
+                    order = c("InterviewScore", "SkillScore", "PersonalityScore", "ExperienceYears", "PreviousCompanies","EducationLevel", "Age", "DistanceFromCompany", "RecruitmentStrategy", "Gender")) # najpierw kompetencje
+
+p1 <- plot(bd1)
+p1
+```
+
+```{r message=FALSE, warning=FALSE}
+bd2 <- predict_parts(explainer = explain_xgb,
+                    new_observation = obs,
+                    type = "break_down_interactions", 
+                    order = c("Gender", "Age", "EducationLevel", "ExperienceYears", "PreviousCompanies", "InterviewScore", "SkillScore", "PersonalityScore", "DistanceFromCompany", "RecruitmentStrategy")) # najpierw zmienne wrażliwe
+
+p2 <- plot(bd2)
+p2
+```
+
+```{r message=FALSE, warning=FALSE}
+bd3 <- predict_parts(explainer = explain_xgb,
+                    new_observation = obs,
+                    type = "break_down_interactions", 
+                    order =  c("DistanceFromCompany","RecruitmentStrategy","Gender", "EducationLevel","Age", "ExperienceYears","PreviousCompanies", "PersonalityScore","SkillScore","InterviewScore")) # najpierw odległość
+
+p3 <- plot(bd3)
+p3
+```
+
+```{r message=FALSE, warning=FALSE}
+bd4 <- predict_parts(explainer = explain_xgb,
+                    new_observation = obs,
+                    type = "break_down_interactions", 
+                    order = c("ExperienceYears", "InterviewScore","SkillScore", "PersonalityScore", "PreviousCompanies","Age", "EducationLevel","Gender", "DistanceFromCompany","RecruitmentStrategy"))
+# najpierw doświadczenie
+
+p4 <- plot(bd4)
+p4
+```
+
+```{r message=FALSE, warning=FALSE}
+bd5 <- predict_parts(explainer = explain_xgb,
+                    new_observation = obs,
+                    type = "break_down_interactions", 
+                    order = c("RecruitmentStrategy", "Age", "ExperienceYears", "PreviousCompanies", "DistanceFromCompany", "InterviewScore", "SkillScore", "PersonalityScore", "Gender", "EducationLevel")) # najpierw strategia rekrutacyjna
+
+p5 <- plot(bd5)
+p5
+```
+Wartości SHAP
+
+```{r message=FALSE, warning=FALSE}
+shap <- predict_parts(explainer = explain_xgb, 
+                      new_observation = obs, 
+                      type = "shap")
+p1 <- plot(shap)
+p2 <- plot(shap, show_boxplots = FALSE) 
+grid.arrange(p1, p2, nrow = 1)
+```
+
